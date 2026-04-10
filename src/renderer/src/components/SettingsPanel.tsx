@@ -60,7 +60,7 @@ export function SettingsPanel({
 }: Props): JSX.Element {
   const [recording, setRecording] = useState<'hotkey' | 'priceCheckHotkey' | null>(null)
   const [changelogOpen, setChangelogOpen] = useState(false)
-  const [tab, setTab] = useState<'general' | 'chat' | 'filter' | 'pricecheck' | 'faq'>('general')
+  const [tab, setTab] = useState<'general' | 'macros' | 'filter' | 'pricecheck' | 'faq'>('general')
   const recRef = useRef<HTMLDivElement>(null)
 
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]): void => {
@@ -106,12 +106,12 @@ export function SettingsPanel({
           <span className="text-[9px] text-accent opacity-60">Beta {__APP_VERSION__}</span>
         </div>
         <div className="flex gap-[6px]">
-          {(['general', 'chat', 'filter', 'pricecheck', 'faq'] as const).map((t) => {
+          {(['general', 'macros', 'filter', 'pricecheck', 'faq'] as const).map((t) => {
             const label =
               t === 'general'
                 ? 'General'
-                : t === 'chat'
-                  ? 'Chat'
+                : t === 'macros'
+                  ? 'Macros'
                   : t === 'filter'
                     ? 'Filter'
                     : t === 'pricecheck'
@@ -237,7 +237,11 @@ export function SettingsPanel({
               <span className="text-xs text-text">Close overlay when clicking outside</span>
             </div>
           </section>
+        </>
+      )}
 
+      {tab === 'macros' && (
+        <>
           {/* Stash tab scrolling */}
           <section>
             <div
@@ -251,11 +255,7 @@ export function SettingsPanel({
               <span className="text-xs text-text">Stash tab scrolling (Ctrl + Scroll Wheel)</span>
             </div>
           </section>
-        </>
-      )}
 
-      {tab === 'chat' && (
-        <>
           {/* Chat Commands */}
           <section>
             <div className="flex flex-col gap-[6px]">
