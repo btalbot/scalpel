@@ -211,19 +211,18 @@ export function SettingsPanel({
           {/* Overlay scale */}
           <section>
             <label>Overlay scale</label>
-            <div className="flex items-center gap-3 mt-[6px]">
-              <input
-                type="range"
-                min="0.5"
-                max="2"
-                step="0.05"
-                value={settings.overlayScale}
-                onChange={(e) => update('overlayScale', parseFloat(e.target.value))}
-                className="flex-1"
-              />
-              <span className="text-xs text-text font-mono min-w-[36px] text-right">
-                {Math.round(settings.overlayScale * 100)}%
-              </span>
+            <div className="flex gap-1.5 mt-[6px]">
+              {[0.75, 1, 1.25, 1.5, 2].map((scale) => (
+                <button
+                  key={scale}
+                  onClick={() => update('overlayScale', scale)}
+                  className={`text-[11px] px-3 py-1.5 ${
+                    settings.overlayScale === scale ? 'bg-accent text-bg-solid' : 'text-text-dim'
+                  }`}
+                >
+                  {Math.round(scale * 100)}%
+                </button>
+              ))}
             </div>
           </section>
 
