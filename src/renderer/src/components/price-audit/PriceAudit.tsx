@@ -81,8 +81,7 @@ export function PriceAudit({ block, blockIndex, tierGroup, item, itemClass, onSe
   const currentSib = tierGroup?.siblings.find((s) => s.blockIndex === blockIndex)
   const currentIdx = tierGroup?.siblings.indexOf(currentSib!) ?? -1
   const isExTier = (t: string): boolean => /^(ex\d*|exhide|exshow|2x\d*)$/.test(t) || t.startsWith('exotic')
-  const isValidTier = (s: { tier: string; block: FilterBlock }): boolean =>
-    !isExTier(s.tier) && s.block.conditions.some((c) => c.type === 'BaseType' && c.values.length > 0)
+  const isValidTier = (s: { tier: string }): boolean => !isExTier(s.tier)
   const tiersAbove = tierGroup && currentIdx > 0 ? tierGroup.siblings.slice(0, currentIdx).filter(isValidTier) : []
   const tiersBelow = tierGroup && currentIdx >= 0 ? tierGroup.siblings.slice(currentIdx + 1).filter(isValidTier) : []
   const higherTier = tiersAbove.length > 0 ? tiersAbove[tiersAbove.length - 1] : null
