@@ -121,7 +121,7 @@ export function SettingsPanel({
               <button
                 key={t}
                 onClick={() => setTab(t)}
-                className={`text-[11px] px-3 py-1.5 ${tab === t ? 'bg-accent text-bg-solid font-semibold' : 'text-text-dim'}`}
+                className={`text-[11px] px-3 py-1.5 ${tab === t ? 'bg-accent text-bg-solid' : 'text-text-dim'}`}
               >
                 {label}
               </button>
