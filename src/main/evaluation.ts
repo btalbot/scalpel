@@ -10,7 +10,7 @@ import {
   evaluateBlock,
 } from './filter/matcher'
 import { getOverlayWindow, showOverlay, setPanelSide } from './overlay'
-import { sendCtrlCToActiveWindow, sendCtrlCViaKeyTap } from './hotkeys'
+import { sendCtrlCToPoE } from './hotkeys'
 import { focusGameWindow } from './overlay'
 import { refreshPrices, lookupPrice, lookupBestUniquePrice, getUniquesByBase } from './trade/prices'
 import { ensureStatsLoaded, matchItemMods } from './trade/trade'
@@ -273,7 +273,7 @@ export function createHotkeyHandler(store: Store<AppSettings>, isElevated: () =>
 
       // Clear clipboard, send Ctrl+C to PoE, then poll until clipboard changes
       clipboard.clear()
-      await sendCtrlCToActiveWindow()
+      await sendCtrlCToPoE()
 
       // Poll for clipboard content
       let item: PoeItem | null = null
@@ -283,12 +283,12 @@ export function createHotkeyHandler(store: Store<AppSettings>, isElevated: () =>
         await new Promise((r) => setTimeout(r, 50))
       }
 
-      // Fallback for windowed mode where VBScript SendKeys can't reach PoE
+      // Fallback for windowed mode
       if (!item) {
         clipboard.clear()
         focusGameWindow()
         await new Promise((r) => setTimeout(r, 50))
-        await sendCtrlCViaKeyTap()
+        await sendCtrlCToPoE()
         for (let i = 0; i < 10; i++) {
           item = readItemFromClipboard()
           if (item) break
@@ -336,7 +336,7 @@ export function createPriceCheckHandler(store: Store<AppSettings>, isElevated: (
       setPanelSide(side)
 
       clipboard.clear()
-      await sendCtrlCToActiveWindow()
+      await sendCtrlCToPoE()
 
       let item: PoeItem | null = null
       for (let i = 0; i < 3; i++) {
@@ -349,7 +349,7 @@ export function createPriceCheckHandler(store: Store<AppSettings>, isElevated: (
         clipboard.clear()
         focusGameWindow()
         await new Promise((r) => setTimeout(r, 50))
-        await sendCtrlCViaKeyTap()
+        await sendCtrlCToPoE()
         for (let i = 0; i < 10; i++) {
           item = readItemFromClipboard()
           if (item) break
