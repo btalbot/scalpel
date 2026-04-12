@@ -407,7 +407,10 @@ export function PriceCheck({
             const statFilters = filters
               .map((f, i) => ({ f, i }))
               .filter(({ f }) => f.type !== 'socket' && f.type !== 'misc' && f.type !== 'timeless')
-            const disabledCount = statFilters.filter(({ f }) => !f.enabled).length
+            const hiddenCount =
+              filtersCollapsed && collapsedVisibleIndices
+                ? statFilters.filter(({ i }) => !collapsedVisibleIndices.has(i)).length
+                : statFilters.filter(({ f }) => !f.enabled).length
 
             if (statFilters.length === 0) return null
 
@@ -434,7 +437,7 @@ export function PriceCheck({
                 ))}
 
                 {/* Show more / hide toggle when collapsed after search */}
-                {filtersCollapsed && disabledCount > 0 && (
+                {filtersCollapsed && hiddenCount > 0 && (
                   <div
                     onClick={() => {
                       setFiltersCollapsed(false)
@@ -444,13 +447,13 @@ export function PriceCheck({
                   >
                     <span className="text-[10px] text-text-dim">&#9654;</span>
                     <span className="text-[11px] text-text-dim">
-                      {disabledCount} more filter{disabledCount !== 1 ? 's' : ''}
+                      {hiddenCount} more filter{hiddenCount !== 1 ? 's' : ''}
                     </span>
                   </div>
                 )}
 
                 {/* Collapse toggle when expanded and has disabled */}
-                {!filtersCollapsed && searched && disabledCount > 0 && (
+                {!filtersCollapsed && searched && hiddenCount > 0 && (
                   <div
                     onClick={() => {
                       setFiltersCollapsed(true)
