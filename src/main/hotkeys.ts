@@ -1,9 +1,7 @@
 import { uIOhook, UiohookKey } from 'uiohook-napi'
-import { execFile } from 'child_process'
-import { writeFileSync, existsSync } from 'fs'
-import { join } from 'path'
-import { app, clipboard, globalShortcut } from 'electron'
+import { clipboard, globalShortcut } from 'electron'
 import { OverlayController } from 'electron-overlay-window'
+import { focusGameWindow } from './overlay'
 
 // ─── Accelerator → uiohook keycode mapping ────────────────────────────────────
 
@@ -231,36 +229,42 @@ export function setAppMacros(macros: Array<{ action: string; hotkey: string }>):
 }
 
 /**
- * Paste text into PoE chat via clipboard. Layout-independent (no SendKeys typing).
- * Opens chat, clears any existing text, pastes, optionally submits.
+ * Paste text into PoE chat via clipboard + uiohook keyTaps.
+ * Layout-independent, near-instant.
  */
-function pasteToPoEChat(text: string, submit: boolean, sleepMs = 50): Promise<void> {
+let chatLocked = false
+function pasteToPoEChat(text: string, submit: boolean): Promise<void> {
+  if (chatLocked) return Promise.resolve()
+  chatLocked = true
+
   const prevClip = clipboard.readText()
   clipboard.writeText(text)
 
-  const dir = app.getPath('userData')
-  const script = join(dir, 'chatcmd.vbs')
-  writeFileSync(
-    script,
-    [
-      'Set WshShell = CreateObject("WScript.Shell")',
-      'WshShell.AppActivate "Path of Exile"',
-      `WScript.Sleep ${sleepMs}`,
-      `WshShell.SendKeys "{ENTER}{HOME}+{END}{DEL}^v${submit ? '{ENTER}' : ''}"`,
-    ].join('\n'),
-  )
+  // Focus PoE so keystrokes reach the game
+  focusGameWindow()
 
-  return new Promise((resolve, reject) => {
-    execFile('cscript', ['//Nologo', '//B', script], (err) => {
-      setTimeout(() => clipboard.writeText(prevClip), 200)
-      if (err) {
-        console.error('[hotkeys] Failed to send chat command:', err)
-        reject(err)
-        return
-      }
+  // All keystrokes fire synchronously within ~5ms so the chat window
+  // opens and closes in a single frame, preventing visible flash
+  uIOhook.keyTap(UiohookKey.Enter)
+  uIOhook.keyToggle(UiohookKey.Ctrl, 'down')
+  uIOhook.keyTap(UiohookKey.A)
+  uIOhook.keyToggle(UiohookKey.Ctrl, 'up')
+  uIOhook.keyTap(UiohookKey.Delete)
+  uIOhook.keyToggle(UiohookKey.Ctrl, 'down')
+  uIOhook.keyTap(UiohookKey.V)
+  uIOhook.keyToggle(UiohookKey.Ctrl, 'up')
+  if (submit) {
+    uIOhook.keyTap(UiohookKey.Enter)
+  }
+
+  // Restore clipboard after paste completes
+  return new Promise((resolve) =>
+    setTimeout(() => {
+      clipboard.writeText(prevClip)
+      chatLocked = false
       resolve()
-    })
-  })
+    }, 50),
+  )
 }
 
 export function sendChatCommand(command: string, autoSubmit = true): Promise<void> {
@@ -293,13 +297,11 @@ function isStashGridArea(x: number, y: number, tb: { x: number; y: number; width
   return y > gridTop && y < gridBottom
 }
 
-// ─── PoE chat command sender ─────────────────────────────────────────────────
-
 /**
  * Send /reloaditemfilter to PoE's chat to reload the loot filter in-game.
  */
 export function sendReloadFilterToPoE(): Promise<void> {
-  return pasteToPoEChat('/reloaditemfilter', true, 100)
+  return pasteToPoEChat('/reloaditemfilter', true)
 }
 
 /**
@@ -309,66 +311,26 @@ export async function sendItemFilterCommand(filterName: string, currentFilter?: 
   if (currentFilter) {
     // Switch to the current filter first to force PoE to rescan its filter directory,
     // so it discovers the newly created file before we switch to it
-    await pasteToPoEChat(`/itemfilter ${currentFilter}`, true, 100)
+    await pasteToPoEChat(`/itemfilter ${currentFilter}`, true)
     await new Promise((r) => setTimeout(r, 500))
   }
-  await pasteToPoEChat(`/itemfilter ${filterName}`, true, 100)
+  await pasteToPoEChat(`/itemfilter ${filterName}`, true)
 }
 
 // ─── Ctrl+C sender ───────────────────────────────────────────────────────────
 
-// Use a tiny VBScript for speed — cscript starts much faster than PowerShell
-let sendKeysScript: string | null = null
-
-function getSendKeysScript(): string {
-  if (sendKeysScript && existsSync(sendKeysScript)) return sendKeysScript
-  const dir = app.getPath('userData')
-  sendKeysScript = join(dir, 'sendctrlc.vbs')
-  writeFileSync(sendKeysScript, 'Set WshShell = CreateObject("WScript.Shell")\nWshShell.SendKeys "^%c"\n')
-  return sendKeysScript
-}
-
 /**
- * Send Ctrl+C to whichever window currently has OS focus (i.e. PoE).
- * Uses cscript + VBScript for minimal startup latency (~50ms vs ~500ms for PowerShell).
- * Returns a promise that resolves after PoE has had time to populate the clipboard.
+ * Send Ctrl+Alt+C to PoE via uiohook (OS-level SendInput).
+ * Releases any modifier keys the user is holding from their hotkey combo
+ * so PoE receives a clean Ctrl+Alt+C.
  */
-export function sendCtrlCToActiveWindow(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const script = getSendKeysScript()
-    execFile('cscript', ['//Nologo', '//B', script], (err) => {
-      if (err) {
-        console.error('[hotkeys] Failed to send Ctrl+C:', err)
-        reject(err)
-        return
-      }
-      // Give PoE ~150ms to process the keypress and write to clipboard
-      setTimeout(resolve, 150)
-    })
-  })
-}
-
-/**
- * Fallback Ctrl+C for windowed mode where VBScript SendKeys can't reach PoE.
- * Uses uiohook keyTap (OS-level SendInput) after the caller focuses PoE via
- * OverlayController.focusTarget().
- *
- * Releases modifier keys the user is physically holding (from the hotkey combo)
- * so PoE receives a clean Ctrl+C. Does NOT re-press them afterward -- the OS
- * tracks physical key state, so the user releasing keys naturally is sufficient.
- * Re-pressing caused stuck modifier keys.
- */
-export function sendCtrlCViaKeyTap(): Promise<void> {
+export function sendCtrlCToPoE(): Promise<void> {
   injecting = true
 
-  // Release modifier keys the user is holding from their hotkey so PoE
-  // receives a clean Ctrl+C (not e.g. Ctrl+Shift+C).
+  // Release modifier keys the user is holding from their hotkey
   if (currentHotkey?.shift) uIOhook.keyToggle(UiohookKey.Shift, 'up')
   if (currentHotkey?.alt) uIOhook.keyToggle(UiohookKey.Alt, 'up')
 
-  // Always explicitly send Ctrl+Alt down/up -- after focusGameWindow() the new
-  // foreground window doesn't inherit the modifier state from the old one,
-  // even if the user is physically holding Ctrl.
   uIOhook.keyToggle(UiohookKey.Ctrl, 'down')
   uIOhook.keyToggle(UiohookKey.Alt, 'down')
   uIOhook.keyTap(UiohookKey.C)
@@ -379,6 +341,6 @@ export function sendCtrlCViaKeyTap(): Promise<void> {
     setTimeout(() => {
       injecting = false
       resolve()
-    }, 50),
+    }, 100),
   )
 }
