@@ -255,13 +255,55 @@ export async function preloadPriceCheck(item: PoeItem, store: Store<AppSettings>
 let hotkeyProcessing = false
 let consecutiveClipboardFailures = 0
 
+/**
+ * Capture an item from PoE's clipboard. Sends Ctrl+Alt+C, polls for content,
+ * falls back to windowed mode if needed. Returns the parsed item or null.
+ */
+async function captureItemFromClipboard(isElevated: () => boolean): Promise<PoeItem | null> {
+  clipboard.clear()
+  await sendCtrlCToPoE()
+
+  // Poll for clipboard content
+  let item: PoeItem | null = null
+  for (let i = 0; i < 3; i++) {
+    item = readItemFromClipboard()
+    if (item) break
+    await new Promise((r) => setTimeout(r, 50))
+  }
+
+  // Fallback for windowed mode
+  if (!item) {
+    clipboard.clear()
+    focusGameWindow()
+    await new Promise((r) => setTimeout(r, 50))
+    await sendCtrlCToPoE()
+    for (let i = 0; i < 10; i++) {
+      item = readItemFromClipboard()
+      if (item) break
+      await new Promise((r) => setTimeout(r, 50))
+    }
+  }
+
+  if (!item) {
+    consecutiveClipboardFailures++
+    if (consecutiveClipboardFailures >= 3 && !isElevated()) {
+      getOverlayWindow()?.webContents.send('elevation-hint')
+    }
+    getOverlayWindow()?.webContents.send('no-item-in-clipboard')
+    showOverlay()
+    return null
+  }
+
+  consecutiveClipboardFailures = 0
+  return item
+}
+
 export function createHotkeyHandler(store: Store<AppSettings>, isElevated: () => boolean): () => Promise<void> {
   return async function onHotkeyFired(): Promise<void> {
     if (hotkeyProcessing) return
     hotkeyProcessing = true
 
     try {
-      // Capture cursor position before anything else - determines stash vs inventory
       lastCursorX = screen.getCursorScreenPoint().x
 
       const currentFilter = getCurrentFilter()
@@ -271,50 +313,14 @@ export function createHotkeyHandler(store: Store<AppSettings>, isElevated: () =>
         return
       }
 
-      // Clear clipboard, send Ctrl+C to PoE, then poll until clipboard changes
-      clipboard.clear()
-      await sendCtrlCToPoE()
-
-      // Poll for clipboard content
-      let item: PoeItem | null = null
-      for (let i = 0; i < 3; i++) {
-        item = readItemFromClipboard()
-        if (item) break
-        await new Promise((r) => setTimeout(r, 50))
-      }
-
-      // Fallback for windowed mode
-      if (!item) {
-        clipboard.clear()
-        focusGameWindow()
-        await new Promise((r) => setTimeout(r, 50))
-        await sendCtrlCToPoE()
-        for (let i = 0; i < 10; i++) {
-          item = readItemFromClipboard()
-          if (item) break
-          await new Promise((r) => setTimeout(r, 50))
-        }
-      }
-
-      if (!item) {
-        consecutiveClipboardFailures++
-        // After 3 consecutive failures, hint that elevation might be the issue
-        if (consecutiveClipboardFailures >= 3 && !isElevated()) {
-          getOverlayWindow()?.webContents.send('elevation-hint')
-        }
-        getOverlayWindow()?.webContents.send('no-item-in-clipboard')
-        showOverlay()
-        return
-      }
-
-      consecutiveClipboardFailures = 0 // Reset on success
+      const item = await captureItemFromClipboard(isElevated)
+      if (!item) return
 
       const side =
         lastCursorX != null && lastCursorX < screen.getPrimaryDisplay().workAreaSize.width / 2 ? 'left' : 'right'
       setPanelSide(side)
 
       evaluateAndSend(item)
-      // Preload price check data so it's ready if user switches tab
       preloadPriceCheck(item, store)
       showOverlay()
     } catch (err) {
@@ -335,45 +341,12 @@ export function createPriceCheckHandler(store: Store<AppSettings>, isElevated: (
       const side = lastCursorX < screen.getPrimaryDisplay().workAreaSize.width / 2 ? 'left' : 'right'
       setPanelSide(side)
 
-      clipboard.clear()
-      await sendCtrlCToPoE()
+      const item = await captureItemFromClipboard(isElevated)
+      if (!item) return
 
-      let item: PoeItem | null = null
-      for (let i = 0; i < 3; i++) {
-        item = readItemFromClipboard()
-        if (item) break
-        await new Promise((r) => setTimeout(r, 50))
-      }
-
-      if (!item) {
-        clipboard.clear()
-        focusGameWindow()
-        await new Promise((r) => setTimeout(r, 50))
-        await sendCtrlCToPoE()
-        for (let i = 0; i < 10; i++) {
-          item = readItemFromClipboard()
-          if (item) break
-          await new Promise((r) => setTimeout(r, 50))
-        }
-      }
-
-      if (!item) {
-        consecutiveClipboardFailures++
-        if (consecutiveClipboardFailures >= 3 && !isElevated()) {
-          getOverlayWindow()?.webContents.send('elevation-hint')
-        }
-        getOverlayWindow()?.webContents.send('no-item-in-clipboard')
-        showOverlay()
-        return
-      }
-
-      consecutiveClipboardFailures = 0
-
-      // Send price check data, open the tab, and show overlay
       getOverlayWindow()?.webContents.send('price-check-open')
       await preloadPriceCheck(item, store)
       showOverlay()
-      // Evaluate filter in background so item tab is ready when user switches to it
       if (getCurrentFilter()) evaluateAndSend(item)
     } catch (err) {
       console.error('[hotkey] Error during price check processing:', err)
