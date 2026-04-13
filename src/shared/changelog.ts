@@ -1,5 +1,13 @@
 export const CHANGELOG: { version: string; notes: string[] }[] = [
   {
+    version: '0.9.1d',
+    notes: [
+      'Fixed issue with certain hotkey combos breaking macros',
+      'Fixed issue with held keys not being restored after hotkeys',
+      "Fixed issue with windows toolbar hiding in borderless fullscreen no you aren't crazy",
+    ],
+  },
+  {
     version: '0.9.1c',
     notes: [
       "Fixed issue price checking items that don't have tiers on mods",
