@@ -175,7 +175,11 @@ export function createOverlayWindow(): BrowserWindow {
 
   overlayWindow.hide = () => {
     if (windowShown) {
-      if (Date.now() - lastShowTime < 500) return
+      if (Date.now() - lastShowTime < 500) {
+        console.log('[overlay] hide() blocked by 500ms debounce')
+        return
+      }
+      console.log('[overlay] hide() executing')
       overlayWindow!.setOpacity(0)
       overlayWindow!.setIgnoreMouseEvents(true)
       // Drop to a lower z-level so the taskbar can appear above us when alt-tabbing.
@@ -190,7 +194,12 @@ export function createOverlayWindow(): BrowserWindow {
       origShowInactive()
       windowShown = true
     }
+    // Toggle alwaysOnTop off/on to force Windows to re-stack the window.
+    // Going from one topmost level to another ('floating' -> 'screen-saver')
+    // doesn't always trigger a re-stack, especially with sibling Electron windows.
+    overlayWindow!.setAlwaysOnTop(false)
     overlayWindow!.setAlwaysOnTop(true, 'screen-saver')
+    overlayWindow!.moveTop()
     overlayWindow!.setOpacity(1)
     opacityHidden = false
     if (onGameFocus) setImmediate(onGameFocus)
@@ -219,7 +228,14 @@ export function createOverlayWindow(): BrowserWindow {
     }
   })
   OverlayController.events.on('focus', () => {
-    if (overlayVisible && overlayWindow && !overlayWindow.isDestroyed()) {
+    console.log('[overlay] focus event fired, overlayVisible:', overlayVisible)
+    if (!overlayWindow || overlayWindow.isDestroyed()) return
+    // Always restore z-level when PoE regains focus, even if overlay is hidden.
+    // Without this, returning from another app (e.g. alt-tab to Spotify and back)
+    // leaves the overlay at 'floating' level, stuck behind the game.
+    overlayWindow.setAlwaysOnTop(true, 'screen-saver')
+    overlayWindow.moveTop()
+    if (overlayVisible) {
       overlayWindow.showInactive()
       mouseOverPanel = false
       overlayWindow.setIgnoreMouseEvents(true)
@@ -252,6 +268,7 @@ function sendGameBounds(physWidth: number, physHeight: number): void {
 
 export function showOverlay(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return
+  console.log('[overlay] showOverlay() called, opacityHidden:', overlayWindow.isVisible())
   overlayVisible = true
   lastShowTime = Date.now()
   // Call the overridden showInactive() to properly reset opacityHidden and restore visibility.
