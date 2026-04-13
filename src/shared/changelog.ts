@@ -1,5 +1,9 @@
 export const CHANGELOG: { version: string; notes: string[] }[] = [
   {
+    version: '0.9.1b',
+    notes: ['Fixed bug with hotkeys firing outside game window'],
+  },
+  {
     version: '0.9.1',
     notes: [
       'Added tiers and advanced mods to price check results',
