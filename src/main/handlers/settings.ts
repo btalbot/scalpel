@@ -5,7 +5,7 @@ import { getOverlayWindow, setCloseOnClickOutside, setOverlayScale } from '../ov
 import { getAppWindow } from '../app-window'
 import { setHotkey, setPriceCheckHotkey, setChatCommands, setAppMacros, setStashScrollEnabled } from '../hotkeys'
 import { refreshPrices } from '../trade/prices'
-import type { AppSettings } from '../../shared/types'
+import type { AppSettings, RegexPreset } from '../../shared/types'
 
 export function register(store: Store<AppSettings>): void {
   ipcMain.handle('get-settings', () => store.store)
@@ -36,5 +36,23 @@ export function register(store: Store<AppSettings>): void {
         win.webContents.send('setting-updated', key, value)
       }
     }
+  })
+
+  ipcMain.handle('get-regex-presets', () => {
+    return (store.get('regexPresets') as RegexPreset[] | undefined) ?? []
+  })
+
+  ipcMain.handle('save-regex-preset', (_event, preset: RegexPreset) => {
+    const presets = (store.get('regexPresets') as RegexPreset[] | undefined) ?? []
+    presets.push(preset)
+    store.set('regexPresets', presets)
+    return presets
+  })
+
+  ipcMain.handle('delete-regex-preset', (_event, id: string) => {
+    const presets = (store.get('regexPresets') as RegexPreset[] | undefined) ?? []
+    const filtered = presets.filter((p) => p.id !== id)
+    store.set('regexPresets', filtered)
+    return filtered
   })
 }
