@@ -1,7 +1,10 @@
 export const CHANGELOG: { version: string; notes: string[] }[] = [
   {
     version: '0.9.1g',
-    notes: ['Updated the way PoE windows are detected to prevent firing in the wrong game'],
+    notes: [
+      'Updated the way PoE windows are detected to prevent firing in the wrong game',
+      'Fixed another z-index issue if the windowed settings was open',
+    ],
   },
   {
     version: '0.9.1f',
