@@ -114,12 +114,13 @@ async function checkForUpdates(_channel: string): Promise<void> {
 
     const remote = await fetchJson<InstallManifest>(manifestAsset.browser_download_url)
     const local = readLocalManifest()
+    const pkg = require('../../package.json')
+    const runningVersion = pkg.version as string
 
     // If no local manifest, write one from current running versions
     if (!local) {
-      const pkg = require('../../package.json')
       const baseline: InstallManifest = {
-        version: pkg.version,
+        version: runningVersion,
         electronVersion: process.versions.electron,
         asarUrl: '',
         asarSha512: '',
@@ -127,10 +128,15 @@ async function checkForUpdates(_channel: string): Promise<void> {
         nativeModules: remote.nativeModules,
       }
       writeLocalManifest(baseline)
-      if (pkg.version === remote.version) {
-        return
-      }
-    } else if (local.version === remote.version) {
+    } else if (local.version !== runningVersion) {
+      // Manifest is stale (e.g. user manually reinstalled a newer version).
+      // Sync it to the running version so we don't re-download what we already have.
+      local.version = runningVersion
+      local.electronVersion = process.versions.electron
+      writeLocalManifest(local)
+    }
+
+    if (runningVersion === remote.version) {
       return
     }
 
