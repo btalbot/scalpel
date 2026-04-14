@@ -96,6 +96,11 @@ export default function App(): JSX.Element {
 
   useEffect(() => {
     window.api.getSettings().then(setSettings)
+    // Pull initial overlay state that may have been set before renderer loaded
+    window.api.getOverlayState().then((state) => {
+      if (state.poeVersion) setPoeVersion(state.poeVersion)
+      if (state.gameBounds) setGameBounds(state.gameBounds)
+    })
     const unsubElevation = window.api.onElevationHint(() => setNeedsElevation(true))
 
     const unsubs = [
@@ -254,22 +259,28 @@ export default function App(): JSX.Element {
   const panelRef = useRef<HTMLDivElement>(null)
   const animRef = useRef<HTMLDivElement>(null)
 
-  // Report actual panel height to main process for accurate click-through bounds
+  // Report the panel's actual visual bounding rect to the main process for click-through
+  // hit testing. Using getBoundingClientRect on the wrapper (which has the CSS transform)
+  // gives us the true visual position, accounting for scale, drag offset, and side.
+  // Single source of truth -- main process just converts CSS coords to physical pixels.
+  //
+  // Polled on a short interval rather than one-shot useEffect because:
+  // - CSS animations (slide-in) change the rect over time
+  // - getBoundingClientRect during animation returns the mid-animation position
+  // - One-shot after state change would capture the animation start, not end
   useEffect(() => {
-    if (!panelRef.current) return
-    const el = panelRef.current
-    const observer = new ResizeObserver(() => {
-      const scale = settings?.overlayScale ?? 1
-      const height = isHidden ? 0 : el.offsetHeight * scale
-      window.api.reportPanelHeight(height)
-    })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [isHidden])
-
-  // Report 0 immediately when hiding
-  useEffect(() => {
-    if (isHidden) window.api.reportPanelHeight(0)
+    if (isHidden) {
+      window.api.reportPanelRect({ left: 0, top: 0, width: 0, height: 0 })
+      return
+    }
+    const tick = (): void => {
+      if (!wrapperRef.current) return
+      const rect = wrapperRef.current.getBoundingClientRect()
+      window.api.reportPanelRect({ left: rect.left, top: rect.top, width: rect.width, height: rect.height })
+    }
+    tick()
+    const interval = setInterval(tick, 100)
+    return () => clearInterval(interval)
   }, [isHidden])
 
   // Suppress slide-in animation when cursorSide changes due to a snap
@@ -279,11 +290,6 @@ export default function App(): JSX.Element {
       skipAnimRef.current = false
     }
   }, [cursorSide, dragOffset])
-
-  // Report drag offset to main process for click-through bounds
-  useEffect(() => {
-    window.api.reportDragOffset(dragOffset.x, dragOffset.y)
-  }, [dragOffset.x, dragOffset.y])
 
   const handleTitleBarMouseDown = (e: React.MouseEvent): void => {
     if ((e.target as HTMLElement).closest('button')) return
@@ -344,7 +350,6 @@ export default function App(): JSX.Element {
           panelRef.current?.classList.remove('panel-unmounted')
           if (snap !== cursorSide) {
             setCursorSide(snap)
-            window.api.reportPanelSide(snap)
           }
           setSnapTarget(null)
           skipAnimRef.current = true

@@ -20,7 +20,6 @@ import {
   showOverlay,
   getOverlayWindow,
   setCloseOnClickOutside,
-  setOverlayScale,
   setGameFocusHandlers,
 } from './overlay'
 import { createAppWindow, showAppWindow, getAppWindow } from './app-window'
@@ -84,14 +83,15 @@ const store = new Store<AppSettings>({
     priceCheckDefaultPercent: 90,
     chatCommands: [],
     stashScrollEnabled: false,
-    poeVersion: 2,
+    poeVersion: 1,
   },
 })
 
 // Backfill defaults for keys added after initial release
 if (store.get('reloadOnSave') === undefined) store.set('reloadOnSave', true)
 if (store.get('stashScrollEnabled') === undefined) store.set('stashScrollEnabled', false)
-if (store.get('poeVersion') === undefined) store.set('poeVersion', 2)
+// Force poeVersion to 1 -- previous test builds defaulted to 2
+store.set('poeVersion', 1)
 
 // Auto-detect overlay scale on first run (deferred until app ready since screen API requires it)
 app.whenReady().then(() => {
@@ -216,7 +216,6 @@ app.whenReady().then(() => {
 
   // Apply close-on-click-outside setting
   setCloseOnClickOutside(store.get('closeOnClickOutside'))
-  setOverlayScale(store.get('overlayScale'))
   setGameFocusHandlers(
     () => resumeHotkeys(),
     () => suspendHotkeys(),
