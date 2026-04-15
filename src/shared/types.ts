@@ -243,12 +243,14 @@ export interface RegexPresetTag {
 
 export interface RegexPreset {
   id: string
+  generator?: string
   tags: RegexPresetTag[]
   avoid: number[]
   want: number[]
   wantMode: 'any' | 'all'
   qualifiers: Record<string, number>
   nightmare: boolean
+  customRegex?: string
 }
 
 export interface AppSettings {

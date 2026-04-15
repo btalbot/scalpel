@@ -58,6 +58,20 @@ function loadSet(key: string): Set<number> {
   return new Set(loadStorage<number[]>(key, []))
 }
 
+const CUSTOM_TAG_TEXT = '#E40000'
+
+/** Style for a preset tag chip */
+function tagChipStyle(tag: RegexPresetTag): React.CSSProperties {
+  const isCustom = !tag.source || tag.source === 'custom'
+  return {
+    background: isCustom ? '#fff' : `${tag.color}cc`,
+    color: isCustom ? CUSTOM_TAG_TEXT : '#fff',
+    border: isCustom ? `1px solid ${CUSTOM_TAG_TEXT}` : undefined,
+    borderRadius: 2,
+    textShadow: isCustom ? undefined : '0 1px 2px rgba(0,0,0,0.4)',
+  }
+}
+
 /** Icon for a preset tag source type */
 function TagSourceIcon({ source, size = 12 }: { source?: string; size?: number }): JSX.Element | null {
   const fill: [string, string] = ['currentColor', 'rgba(255,255,255,0.2)']
@@ -108,6 +122,15 @@ function useMomentumScroll(ignoreSelectors: string[] = []) {
 }
 
 export function MapMods(): JSX.Element {
+  const [generator, _setGenerator] = useState<'maps' | 'custom'>('maps')
+  const savedTagsByGenerator = useRef<Record<string, (RegexPresetTag & { id: number })[]>>({})
+  const setGenerator = (g: 'maps' | 'custom') => {
+    // Stash current tags, restore target's tags
+    savedTagsByGenerator.current[generator] = presetTags
+    setPresetTags(savedTagsByGenerator.current[g] ?? [])
+    setCustomTagInput('')
+    _setGenerator(g)
+  }
   const [tab, setTab] = useState<Tab>('qualifiers')
   const [avoid, setAvoid] = useState<Set<number>>(() => loadSet('scalpel:regex:map-avoid'))
   const [want, setWant] = useState<Set<number>>(() => loadSet('scalpel:regex:map-want'))
@@ -126,6 +149,7 @@ export function MapMods(): JSX.Element {
   const [presetsOpen, setPresetsOpen] = useState(false)
   const [presetTags, setPresetTags] = useState<(RegexPresetTag & { id: number })[]>([])
   const [customTagInput, setCustomTagInput] = useState('')
+  const [customRegexInput, setCustomRegexInput] = useState('')
   const [presets, setPresets] = useState<RegexPreset[]>([])
   const [copied, setCopied] = useState(false)
   const [avoidCollapsed, setAvoidCollapsed] = useState<Set<string>>(
@@ -213,7 +237,8 @@ export function MapMods(): JSX.Element {
   const wantMods = MAP_MODS.filter((m) => want.has(m.id))
   const qualifierRegex = buildQualifierRegex(qualifiers)
   const modRegex = buildMapRegex(avoidMods, wantMods, wantMode)
-  const regex = [qualifierRegex, modRegex].filter(Boolean).join(' ')
+  const mapRegex = [qualifierRegex, modRegex].filter(Boolean).join(' ')
+  const regex = generator === 'custom' ? customRegexInput : mapRegex
   const isOverLimit = regex.length > POE_REGEX_MAX_LENGTH
   const qualifierCount = QUALIFIERS.filter((q) => qualifiers[q.id] != null && qualifiers[q.id]! > 0).length
 
@@ -248,19 +273,28 @@ export function MapMods(): JSX.Element {
     setTimeout(() => setCopied(false), 1500)
   }
 
+  // Auto-tag generation per generator. Generators without a function here (e.g. custom) have no auto-tags.
+  const getAutoTags = (): RegexPresetTag[] | null => {
+    if (generator === 'maps') return generatePresetTags({ avoid, want, qualifiers })
+    return null
+  }
+
   // Seed tags when presets panel first opens
   useEffect(() => {
     if (presetsOpen && presetTags.length === 0) {
-      setPresetTags(generatePresetTags({ avoid, want, qualifiers }).map((t, i) => ({ ...t, id: i })))
-      setCustomTagInput('')
+      const auto = getAutoTags()
+      if (auto) {
+        setPresetTags(auto.map((t, i) => ({ ...t, id: i })))
+        setCustomTagInput('')
+      }
     }
   }, [presetsOpen])
 
   // Keep auto-generated tags in sync with live state while panel is open.
   // Custom tags and tag order are preserved.
   useEffect(() => {
-    if (!presetsOpen) return
-    const fresh = generatePresetTags({ avoid, want, qualifiers })
+    const fresh = getAutoTags()
+    if (!presetsOpen || !fresh) return
     setPresetTags((prev) => {
       // Build a set of fresh sourceIds
       const freshBySourceId = new Map<string | number, (typeof fresh)[0]>()
@@ -311,7 +345,9 @@ export function MapMods(): JSX.Element {
     if (presetTags.length === 0) return
     // Detect dupes by sorted tag text (order-independent)
     const tagKey = [...presetTags.map((t) => t.text)].sort().join('|')
-    const existingDupe = presets.find((p) => [...p.tags.map((t) => t.text)].sort().join('|') === tagKey)
+    const existingDupe = presets.find(
+      (p) => (p.generator ?? 'maps') === generator && [...p.tags.map((t) => t.text)].sort().join('|') === tagKey,
+    )
     if (existingDupe) {
       // Same tags, different order -- update the existing preset with new order
       const updated = await window.api.deleteRegexPreset(existingDupe.id)
@@ -319,12 +355,14 @@ export function MapMods(): JSX.Element {
     }
     const preset: RegexPreset = {
       id: crypto.randomUUID(),
+      generator,
       tags: presetTags,
       avoid: [...avoid],
       want: [...want],
       wantMode,
       qualifiers: Object.fromEntries(Object.entries(qualifiers).filter(([, v]) => v != null)) as Record<string, number>,
       nightmare: showNightmare,
+      ...(generator === 'custom' ? { customRegex: customRegexInput } : {}),
     }
     const updated = await window.api.saveRegexPreset(preset)
     setPresets(updated)
@@ -335,11 +373,15 @@ export function MapMods(): JSX.Element {
   const loadPreset = (preset: RegexPreset) => {
     // Use the saved tags in their saved order
     setPresetTags((preset.tags || []).map((t, i) => ({ ...t, id: Date.now() + i })))
-    setAvoid(new Set(preset.avoid))
-    setWant(new Set(preset.want))
-    setWantMode(preset.wantMode)
-    setQualifiers(preset.qualifiers)
-    setShowNightmare(preset.nightmare)
+    if ((preset.generator ?? 'maps') === 'custom') {
+      setCustomRegexInput(preset.customRegex ?? '')
+    } else {
+      setAvoid(new Set(preset.avoid))
+      setWant(new Set(preset.want))
+      setWantMode(preset.wantMode)
+      setQualifiers(preset.qualifiers)
+      setShowNightmare(preset.nightmare)
+    }
   }
 
   const deletePreset = async (id: string) => {
@@ -366,72 +408,119 @@ export function MapMods(): JSX.Element {
             {copied ? 'Copied!' : 'Copy'}
           </button>
         </div>
-        <div className="flex items-center justify-between mt-1">
-          <InfoChip size="sm">
-            <span className="text-text-dim">
-              {avoidMods.length + wantMods.length} mod{avoidMods.length + wantMods.length !== 1 ? 's' : ''}
-            </span>
-          </InfoChip>
-          <InfoChip size="sm">
-            <a
-              href="https://poe.re"
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => {
-                e.preventDefault()
-                window.api.openExternal('https://poe.re')
-              }}
-              className="flex items-center gap-1 no-underline"
-            >
-              <img src={poereIconTight} alt="" className="w-[14px] h-[14px]" style={{ marginTop: 1, marginLeft: -2 }} />
-              <span className="text-text-dim">Powered by poe.re</span>
-            </a>
-          </InfoChip>
-          <InfoChip size="sm" color={isOverLimit ? '#ef5350' : undefined} className="!pr-[3px]">
-            <span className="flex items-center gap-1.5">
-              {regex.length} / {POE_REGEX_MAX_LENGTH}
-              <button
-                onClick={() => {
-                  setAvoid(new Set())
-                  setWant(new Set())
-                  setQualifiers({})
+        <div className="grid grid-cols-3 items-center mt-1">
+          <div className="flex justify-start">
+            <InfoChip size="sm">
+              <span className="text-text-dim">
+                {(() => {
+                  const count = generator === 'custom' ? (customRegexInput ? 1 : 0) : avoidMods.length + wantMods.length
+                  return `${count} mod${count !== 1 ? 's' : ''}`
+                })()}
+              </span>
+            </InfoChip>
+          </div>
+          <div className="flex justify-center">
+            <InfoChip size="sm">
+              <a
+                href="https://poe.re"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => {
+                  e.preventDefault()
+                  window.api.openExternal('https://poe.re')
                 }}
-                disabled={avoid.size === 0 && want.size === 0 && qualifierCount === 0}
-                className="text-[9px] font-semibold text-accent border-none rounded-full cursor-pointer px-2 py-[2px] bg-white/[0.08] disabled:opacity-30 disabled:cursor-default"
-                onMouseEnter={(e) => {
-                  if (!e.currentTarget.disabled) e.currentTarget.style.background = 'rgba(255,255,255,0.15)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
-                }}
+                className="flex items-center gap-1 no-underline"
               >
-                Clear
-              </button>
-            </span>
-          </InfoChip>
+                <img
+                  src={poereIconTight}
+                  alt=""
+                  className="w-[14px] h-[14px]"
+                  style={{ marginTop: 1, marginLeft: -2 }}
+                />
+                <span className="text-text-dim">Powered by poe.re</span>
+              </a>
+            </InfoChip>
+          </div>
+          <div className="flex justify-end">
+            <InfoChip size="sm" color={isOverLimit ? '#ef5350' : undefined} className="!pr-[3px]">
+              <span className="flex items-center gap-1.5">
+                {regex.length} / {POE_REGEX_MAX_LENGTH}
+                <button
+                  onClick={() => {
+                    if (generator === 'custom') {
+                      setCustomRegexInput('')
+                    } else {
+                      setAvoid(new Set())
+                      setWant(new Set())
+                      setQualifiers({})
+                    }
+                  }}
+                  disabled={
+                    generator === 'custom'
+                      ? !customRegexInput
+                      : avoid.size === 0 && want.size === 0 && qualifierCount === 0
+                  }
+                  className="text-[9px] font-semibold text-accent border-none rounded-full cursor-pointer px-2 py-[2px] bg-white/[0.08] disabled:opacity-30 disabled:cursor-default"
+                  onMouseEnter={(e) => {
+                    if (!e.currentTarget.disabled) e.currentTarget.style.background = 'rgba(255,255,255,0.15)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
+                  }}
+                >
+                  Clear
+                </button>
+              </span>
+            </InfoChip>
+          </div>
         </div>
       </div>
 
-      {/* Chips + search */}
+      {/* Generator tabs */}
+      <div className="flex border-b border-border bg-bg-card">
+        {(['maps', 'custom'] as const).map((g) => (
+          <button
+            key={g}
+            onClick={() => setGenerator(g)}
+            className="flex-1 text-[11px] py-[6px] border-none cursor-pointer font-semibold rounded-none"
+            style={{
+              background: generator === g ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
+              color: generator === g ? '#171821' : 'var(--text-dim)',
+            }}
+            onMouseEnter={(e) => {
+              if (generator !== g) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
+            }}
+            onMouseLeave={(e) => {
+              if (generator !== g) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
+            }}
+          >
+            {g === 'maps' ? 'Maps' : 'Custom'}
+          </button>
+        ))}
+      </div>
+
+      {/* Chips + search/presets */}
       <div className="flex flex-col px-3 py-2 border-b border-border bg-bg-card">
         <div className="flex items-center gap-[6px]">
+          {generator !== 'custom' && (
+            <FilterChip
+              label={
+                <>
+                  <Search size={12} theme="outline" fill="currentColor" /> Search
+                </>
+              }
+              active={searchOpen}
+              onClick={() => {
+                setSearchOpen((v) => !v)
+                if (searchOpen) setSearch('')
+                if (!searchOpen) setPresetsOpen(false)
+              }}
+            />
+          )}
           <FilterChip
             label={
               <>
-                <Search size={12} theme="outline" fill="currentColor" /> Search
-              </>
-            }
-            active={searchOpen}
-            onClick={() => {
-              setSearchOpen((v) => !v)
-              if (searchOpen) setSearch('')
-              if (!searchOpen) setPresetsOpen(false)
-            }}
-          />
-          <FilterChip
-            label={
-              <>
-                <Save size={12} theme="outline" fill="currentColor" /> Presets
+                <Save size={12} theme="outline" fill="currentColor" /> Save / Load
               </>
             }
             active={presetsOpen}
@@ -443,7 +532,7 @@ export function MapMods(): JSX.Element {
               }
             }}
           />
-          {tab !== 'qualifiers' && (
+          {generator === 'maps' && tab !== 'qualifiers' && (
             <FilterChip
               label="Nightmare"
               active={showNightmare}
@@ -500,14 +589,7 @@ export function MapMods(): JSX.Element {
                   <span
                     key={tag.id}
                     className="flex items-center gap-[5px] px-[6px] py-[2px] rounded text-[10px] font-semibold shrink-0 cursor-grab"
-                    style={{
-                      background: `${tag.color}cc`,
-                      color: '#fff',
-                      borderRadius: 2,
-                      textShadow: '0 1px 2px rgba(0,0,0,0.4)',
-                      paddingTop: 1,
-                      paddingBottom: 3,
-                    }}
+                    style={{ ...tagChipStyle(tag), paddingTop: 1, paddingBottom: 3 }}
                   >
                     <TagSourceIcon source={tag.source} size={12} />
                     {tag.text}
@@ -523,7 +605,7 @@ export function MapMods(): JSX.Element {
                 <input
                   key="input"
                   type="text"
-                  placeholder={presetTags.length === 0 ? 'Add tags...' : ''}
+                  placeholder={presetTags.length === 0 ? 'Add tags to remember what this regex does' : 'Add more tags'}
                   value={customTagInput}
                   onChange={(e) => setCustomTagInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -536,7 +618,7 @@ export function MapMods(): JSX.Element {
                     }
                   }}
                   className="no-drag flex-1 min-w-[60px] text-[11px] bg-transparent border-none outline-none text-text"
-                  style={{ padding: '2px 0' }}
+                  style={{ padding: '2px 0', marginLeft: presetTags.length > 0 ? 4 : 0 }}
                 />
               </ReactSortable>
               <button
@@ -554,385 +636,416 @@ export function MapMods(): JSX.Element {
       </div>
       {/* close px-3 chips section */}
       {/* Saved presets -- horizontal scrolling cards (outside px-3 and overflow-hidden) */}
-      {presets.length > 0 && presetsOpen && (
-        <div className="border-b border-border bg-bg-card py-2">
-          <span className="text-[9px] text-text-dim font-semibold uppercase tracking-wider ml-3 mb-1 block">
-            Saved Regex
-          </span>
-          <div
-            className="flex overflow-x-auto pb-1 preset-slider"
-            style={{ paddingLeft: 12 }}
-            onMouseDown={useMomentumScroll(['.preset-grab', '.preset-delete'])}
-          >
-            <ReactSortable
-              list={presets}
-              setList={(newList) => {
-                setPresets(newList)
-                window.api.reorderRegexPresets(newList.map((p) => p.id))
-              }}
-              animation={150}
-              handle=".preset-grab"
-              filter=".preset-delete"
-              preventOnFilter={false}
-              className="flex gap-2"
-            >
-              {presets.map((p) => (
-                <div
-                  key={p.id}
-                  className="flex shrink-0 rounded bg-black/20 hover:bg-black/30 transition-colors cursor-pointer relative group"
-                  style={{ width: 160, minHeight: 60 }}
-                  onClick={() => loadPreset(p)}
+      {(() => {
+        const filtered = presets.filter((p) => (p.generator ?? 'maps') === generator)
+        return (
+          filtered.length > 0 &&
+          presetsOpen && (
+            <div className="border-b border-border bg-bg-card py-2">
+              <span className="text-[9px] text-text-dim font-semibold uppercase tracking-wider ml-3 mb-1 block">
+                Saved Regex
+              </span>
+              <div
+                className="flex overflow-x-auto pb-1 preset-slider"
+                style={{ paddingLeft: 12 }}
+                onMouseDown={useMomentumScroll(['.preset-grab', '.preset-delete'])}
+              >
+                <ReactSortable
+                  list={filtered}
+                  setList={(newList) => {
+                    // Merge reordered filtered presets back with the rest
+                    const otherPresets = presets.filter((p) => (p.generator ?? 'maps') !== generator)
+                    const merged = [...otherPresets, ...newList]
+                    setPresets(merged)
+                    window.api.reorderRegexPresets(merged.map((p) => p.id))
+                  }}
+                  animation={150}
+                  handle=".preset-grab"
+                  filter=".preset-delete"
+                  preventOnFilter={false}
+                  className="flex gap-2"
                 >
-                  {/* Left strip: X delete + grab handle */}
-                  <div className="flex flex-col items-center py-1.5 px-[3px] opacity-0 group-hover:opacity-100 transition-opacity preset-controls">
+                  {filtered.map((p) => (
                     <div
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        deletePreset(p.id)
-                      }}
-                      className="preset-delete cursor-pointer text-text-dim hover:text-[#ef5350] transition-colors"
+                      key={p.id}
+                      className="flex shrink-0 rounded bg-black/20 hover:bg-black/30 transition-colors cursor-pointer relative group"
+                      style={{ width: 160, minHeight: 60 }}
+                      onClick={() => loadPreset(p)}
                     >
-                      <CloseSmall size={11} theme="outline" fill="currentColor" />
-                    </div>
-                    <div
-                      className="preset-grab cursor-grab text-text-dim hover:text-text transition-colors flex-1 flex items-center justify-center"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Drag size={10} theme="outline" fill="currentColor" />
-                    </div>
-                  </div>
-                  <div className="flex-1 p-2 pl-0 min-w-0">
-                    <div
-                      className="flex flex-wrap gap-[3px]"
-                      style={{ maxHeight: 68, overflow: 'hidden' }}
-                      ref={(el) => {
-                        if (el) {
-                          el.style.webkitMaskImage =
-                            el.scrollHeight > el.clientHeight
-                              ? 'linear-gradient(to bottom, black 75%, transparent 100%)'
-                              : 'none'
-                        }
-                      }}
-                    >
-                      {p.tags.map((tag, i) => (
-                        <span
-                          key={i}
-                          className="flex items-center gap-[3px] px-[5px] py-[1px] text-[9px] font-semibold shrink-0"
-                          style={{
-                            background: `${tag.color}cc`,
-                            color: '#fff',
-                            borderRadius: 2,
-                            textShadow: '0 1px 2px rgba(0,0,0,0.4)',
+                      {/* Left strip: X delete + grab handle */}
+                      <div className="flex flex-col items-center py-1.5 px-[3px] opacity-0 group-hover:opacity-100 transition-opacity preset-controls">
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            deletePreset(p.id)
+                          }}
+                          className="preset-delete cursor-pointer text-text-dim hover:text-[#ef5350] transition-colors"
+                        >
+                          <CloseSmall size={11} theme="outline" fill="currentColor" />
+                        </div>
+                        <div
+                          className="preset-grab cursor-grab text-text-dim hover:text-text transition-colors flex-1 flex items-center justify-center"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Drag size={10} theme="outline" fill="currentColor" />
+                        </div>
+                      </div>
+                      <div className="flex-1 p-2 pl-0 min-w-0">
+                        <div
+                          className="flex flex-wrap gap-[3px]"
+                          style={{ maxHeight: 68, overflow: 'hidden' }}
+                          ref={(el) => {
+                            if (el) {
+                              el.style.webkitMaskImage =
+                                el.scrollHeight > el.clientHeight
+                                  ? 'linear-gradient(to bottom, black 75%, transparent 100%)'
+                                  : 'none'
+                            }
                           }}
                         >
-                          <TagSourceIcon source={tag.source} size={8} />
-                          {tag.text}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </ReactSortable>
-            <div style={{ minWidth: 12, flexShrink: 0 }} />
-          </div>
-        </div>
-      )}
-
-      {/* Qualifiers / Avoid / Want tabs */}
-      <div className="flex gap-1 px-2 pt-1 pb-0 bg-bg-card">
-        {(['qualifiers', 'avoid', 'want'] as const).map((t) => {
-          const isActive = tab === t
-          const color = TAB_COLORS[t]
-          const count = t === 'avoid' ? avoid.size : t === 'want' ? want.size : qualifierCount
-          return (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`flex-1 flex items-center justify-between px-3 text-[11px] py-[5px] border-none cursor-pointer transition-colors relative ${isActive ? 'regex-tab-active' : ''}`}
-              style={{
-                background: isActive ? 'var(--bg-solid)' : 'transparent',
-                color: isActive ? color : 'var(--text-dim)',
-                fontWeight: 600,
-                borderRadius: isActive ? '6px 6px 0 0' : '6px',
-                padding: isActive ? '5px 12px' : '1px 11px',
-                ...(isActive ? {} : { margin: '4px 1px' }),
-                minHeight: isActive ? 30 : undefined,
-              }}
-              onMouseEnter={(e) => {
-                if (!isActive) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
-              }}
-              onMouseLeave={(e) => {
-                if (!isActive) e.currentTarget.style.background = 'transparent'
-              }}
-            >
-              <span className="flex items-center gap-[6px]">
-                {t === 'qualifiers' && (
-                  <AddOne size={18} theme="two-tone" fill={['currentColor', 'rgba(255,255,255,0.2)']} />
-                )}
-                {t === 'avoid' && (
-                  <Forbid size={18} theme="two-tone" fill={['currentColor', 'rgba(255,255,255,0.2)']} />
-                )}
-                {t === 'want' && (
-                  <CheckOne size={18} theme="two-tone" fill={['currentColor', 'rgba(255,255,255,0.2)']} />
-                )}
-                {t === 'qualifiers' ? 'Qualifiers' : t === 'avoid' ? 'Avoid' : 'Want'}
-              </span>
-              {count > 0 && (
-                <span style={{ transform: 'translateY(1px)' }}>
-                  <InfoChip color={color}>
-                    <span className="font-bold">{count}</span>
-                  </InfoChip>
-                </span>
-              )}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Qualifier optimization toggle */}
-      {tab === 'qualifiers' && (
-        <div
-          className="flex items-center gap-[6px] px-3 py-[6px] border-b border-border"
-          style={{ background: 'var(--bg-solid)' }}
-        >
-          <FilterChip
-            label="Regular"
-            active={!optimizeNumbers}
-            onClick={() => setOptimizeNumbers(false)}
-            color={TAB_COLORS.qualifiers}
-          />
-          <FilterChip
-            label="Optimized"
-            active={optimizeNumbers}
-            onClick={() => {
-              setOptimizeNumbers(true)
-              // Snap current values to 10s
-              setQualifiers((prev) => {
-                const snapped: QualifierValues = {}
-                for (const [k, v] of Object.entries(prev)) {
-                  snapped[k] = v != null && v > 0 ? Math.floor(v / 10) * 10 || v : v
-                }
-                return snapped
-              })
-            }}
-            color={TAB_COLORS.qualifiers}
-          />
-        </div>
-      )}
-
-      {/* Want mode toggle */}
-      {tab === 'want' && (
-        <div
-          className="flex items-center justify-end gap-[6px] px-3 py-[6px] border-b border-border"
-          style={{ background: 'var(--bg-solid)' }}
-        >
-          <FilterChip
-            label="Any"
-            active={wantMode === 'any'}
-            onClick={() => setWantMode('any')}
-            color={TAB_COLORS.want}
-          />
-          <FilterChip
-            label="All"
-            active={wantMode === 'all'}
-            onClick={() => setWantMode('all')}
-            color={TAB_COLORS.want}
-          />
-        </div>
-      )}
-
-      {/* Qualifiers list */}
-      {tab === 'qualifiers' && (
-        <div className="flex-1 overflow-y-auto bg-bg-card">
-          {QUALIFIER_GROUPS.map((group) => {
-            const filteredQuals = search
-              ? group.qualifiers.filter((q) => q.label.toLowerCase().includes(search.toLowerCase()))
-              : group.qualifiers
-            if (filteredQuals.length === 0) return null
-            const isGroupCollapsed = qualCollapsed.has(group.label)
-            const activeInGroup = group.qualifiers.filter(
-              (q) => qualifiers[q.id] != null && qualifiers[q.id]! > 0,
-            ).length
-            return (
-              <div key={group.label}>
-                <div
-                  className="flex items-center gap-2 px-3 py-[8px] sticky-group-header cursor-pointer select-none sticky top-0 z-[1]"
-                  style={{ height: 39, boxSizing: 'border-box' }}
-                  onClick={() =>
-                    setQualCollapsed((prev) => {
-                      const next = new Set(prev)
-                      if (next.has(group.label)) next.delete(group.label)
-                      else next.add(group.label)
-                      return next
-                    })
-                  }
-                >
-                  {group.icon === 'setting-config' && (
-                    <SettingConfig
-                      size={14}
-                      theme="two-tone"
-                      fill={['var(--text)', 'rgba(255,255,255,0.2)']}
-                      style={{ marginTop: 1, marginLeft: -2 }}
-                    />
-                  )}
-                  {group.icon === 'compass' && (
-                    <Compass
-                      size={14}
-                      theme="two-tone"
-                      fill={['var(--text)', 'rgba(255,255,255,0.2)']}
-                      style={{ marginTop: 1, marginLeft: -2 }}
-                    />
-                  )}
-                  <span className="text-[10px] uppercase tracking-wider font-bold flex-1 text-text">{group.label}</span>
-                  {activeInGroup > 0 && (
-                    <InfoChip color={TAB_COLORS.qualifiers}>
-                      <span className="font-bold">{activeInGroup}</span>
-                    </InfoChip>
-                  )}
-                  {isGroupCollapsed ? (
-                    <Right
-                      size={12}
-                      theme="two-tone"
-                      fill={['currentColor', 'currentColor']}
-                      className="text-text-dim"
-                    />
-                  ) : (
-                    <Down
-                      size={12}
-                      theme="two-tone"
-                      fill={['currentColor', 'currentColor']}
-                      className="text-text-dim"
-                    />
-                  )}
-                </div>
-                {!isGroupCollapsed &&
-                  filteredQuals.map((q, qi) => (
-                    <div
-                      key={q.id}
-                      className="flex items-center gap-2 px-3 py-[6px]"
-                      style={{
-                        background:
-                          qualifiers[q.id] != null && qualifiers[q.id]! > 0
-                            ? 'rgba(129,199,132,0.08)'
-                            : qi % 2 === 0
-                              ? 'rgba(255,255,255,0.02)'
-                              : 'transparent',
-                      }}
-                    >
-                      <span
-                        className="text-[11px] flex-1"
-                        style={{
-                          color: qualifiers[q.id] != null && qualifiers[q.id]! > 0 ? 'var(--text)' : 'var(--text-dim)',
-                        }}
-                      >
-                        {q.label}
-                      </span>
-                      <ScrubInput
-                        value={qualifiers[q.id] ?? null}
-                        placeholder="--"
-                        step={optimizeNumbers ? 10 : 1}
-                        onChange={(val) => {
-                          const snapped =
-                            optimizeNumbers && val != null && val > 0 ? Math.floor(val / 10) * 10 || val : val
-                          setQualifiers((prev) => ({ ...prev, [q.id]: snapped }))
-                        }}
-                      />
+                          {p.tags.map((tag, i) => (
+                            <span
+                              key={i}
+                              className="flex items-center gap-[3px] px-[5px] py-[1px] text-[9px] font-semibold shrink-0"
+                              style={tagChipStyle(tag)}
+                            >
+                              <TagSourceIcon source={tag.source} size={8} />
+                              {tag.text}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   ))}
+                </ReactSortable>
+                <div style={{ minWidth: 12, flexShrink: 0 }} />
               </div>
-            )
-          })}
-        </div>
-      )}
+            </div>
+          )
+        )
+      })()}
 
-      {/* Mod list (avoid/want) */}
-      {(tab === 'avoid' || tab === 'want') && (
-        <div className="flex-1 overflow-y-auto bg-bg-card">
-          {grouped.map(({ mods, label, color, key }) => {
-            const isCollapsed = collapsed.has(key)
-            const selectedInGroup = mods.filter((m) => selected.has(m.id)).length
-            return (
-              <div key={key}>
-                <div
-                  className="flex items-center gap-2 px-3 py-[8px] sticky-group-header cursor-pointer select-none sticky top-0 z-[1]"
-                  style={{ height: 39, boxSizing: 'border-box' }}
-                  onClick={() => toggleCollapse(key)}
+      {/* Maps generator */}
+      {generator === 'maps' && (
+        <>
+          {/* Qualifiers / Avoid / Want tabs */}
+          <div className="flex gap-1 px-2 pt-1 pb-0 bg-bg-card">
+            {(['qualifiers', 'avoid', 'want'] as const).map((t) => {
+              const isActive = tab === t
+              const color = TAB_COLORS[t]
+              const count = t === 'avoid' ? avoid.size : t === 'want' ? want.size : qualifierCount
+              return (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className={`flex-1 flex items-center justify-between px-3 text-[11px] py-[5px] border-none cursor-pointer transition-colors relative ${isActive ? 'regex-tab-active' : ''}`}
+                  style={{
+                    background: isActive ? 'var(--bg-solid)' : 'transparent',
+                    color: isActive ? color : 'var(--text-dim)',
+                    fontWeight: 600,
+                    borderRadius: isActive ? '6px 6px 0 0' : '6px',
+                    padding: isActive ? '5px 12px' : '1px 11px',
+                    ...(isActive ? {} : { margin: '4px 1px' }),
+                    minHeight: isActive ? 30 : undefined,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive) e.currentTarget.style.background = 'transparent'
+                  }}
                 >
-                  <div className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
-                  <span className="text-[10px] uppercase tracking-wider font-bold flex-1" style={{ color }}>
-                    {label}
+                  <span className="flex items-center gap-[6px]">
+                    {t === 'qualifiers' && (
+                      <AddOne size={18} theme="two-tone" fill={['currentColor', 'rgba(255,255,255,0.2)']} />
+                    )}
+                    {t === 'avoid' && (
+                      <Forbid size={18} theme="two-tone" fill={['currentColor', 'rgba(255,255,255,0.2)']} />
+                    )}
+                    {t === 'want' && (
+                      <CheckOne size={18} theme="two-tone" fill={['currentColor', 'rgba(255,255,255,0.2)']} />
+                    )}
+                    {t === 'qualifiers' ? 'Qualifiers' : t === 'avoid' ? 'Avoid' : 'Want'}
                   </span>
-                  {selectedInGroup > 0 && (
-                    <InfoChip color={color}>
-                      <span className="font-bold">{selectedInGroup}</span>
-                    </InfoChip>
+                  {count > 0 && (
+                    <span style={{ transform: 'translateY(1px)' }}>
+                      <InfoChip color={color}>
+                        <span className="font-bold">{count}</span>
+                      </InfoChip>
+                    </span>
                   )}
-                  {isCollapsed ? (
-                    <Right
-                      size={12}
-                      theme="two-tone"
-                      fill={['currentColor', 'currentColor']}
-                      className="text-text-dim"
-                    />
-                  ) : (
-                    <Down
-                      size={12}
-                      theme="two-tone"
-                      fill={['currentColor', 'currentColor']}
-                      className="text-text-dim"
-                    />
-                  )}
-                </div>
-                {!isCollapsed &&
-                  mods.map((m, mi) => {
-                    const isSelected = selected.has(m.id)
-                    return (
-                      <div
-                        key={m.id}
-                        onClick={() => toggle(m.id)}
-                        className="flex items-center gap-2 px-3 py-[4px] cursor-pointer select-none transition-colors"
-                        style={{
-                          background: isSelected
-                            ? tab === 'avoid'
-                              ? 'rgba(239,83,80,0.08)'
-                              : 'rgba(129,199,132,0.08)'
-                            : mi % 2 === 0
-                              ? 'rgba(255,255,255,0.02)'
-                              : 'transparent',
-                        }}
-                      >
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Qualifier optimization toggle */}
+          {tab === 'qualifiers' && (
+            <div
+              className="flex items-center gap-[6px] px-3 py-[6px] border-b border-border"
+              style={{ background: 'var(--bg-solid)' }}
+            >
+              <FilterChip
+                label="Regular"
+                active={!optimizeNumbers}
+                onClick={() => setOptimizeNumbers(false)}
+                color={TAB_COLORS.qualifiers}
+              />
+              <FilterChip
+                label="Optimized"
+                active={optimizeNumbers}
+                onClick={() => {
+                  setOptimizeNumbers(true)
+                  // Snap current values to 10s
+                  setQualifiers((prev) => {
+                    const snapped: QualifierValues = {}
+                    for (const [k, v] of Object.entries(prev)) {
+                      snapped[k] = v != null && v > 0 ? Math.floor(v / 10) * 10 || v : v
+                    }
+                    return snapped
+                  })
+                }}
+                color={TAB_COLORS.qualifiers}
+              />
+            </div>
+          )}
+
+          {/* Want mode toggle */}
+          {tab === 'want' && (
+            <div
+              className="flex items-center justify-end gap-[6px] px-3 py-[6px] border-b border-border"
+              style={{ background: 'var(--bg-solid)' }}
+            >
+              <FilterChip
+                label="Any"
+                active={wantMode === 'any'}
+                onClick={() => setWantMode('any')}
+                color={TAB_COLORS.want}
+              />
+              <FilterChip
+                label="All"
+                active={wantMode === 'all'}
+                onClick={() => setWantMode('all')}
+                color={TAB_COLORS.want}
+              />
+            </div>
+          )}
+
+          {/* Qualifiers list */}
+          {tab === 'qualifiers' && (
+            <div className="flex-1 overflow-y-auto bg-bg-card">
+              {QUALIFIER_GROUPS.map((group) => {
+                const filteredQuals = search
+                  ? group.qualifiers.filter((q) => q.label.toLowerCase().includes(search.toLowerCase()))
+                  : group.qualifiers
+                if (filteredQuals.length === 0) return null
+                const isGroupCollapsed = qualCollapsed.has(group.label)
+                const activeInGroup = group.qualifiers.filter(
+                  (q) => qualifiers[q.id] != null && qualifiers[q.id]! > 0,
+                ).length
+                return (
+                  <div key={group.label}>
+                    <div
+                      className="flex items-center gap-2 px-3 py-[8px] sticky-group-header cursor-pointer select-none sticky top-0 z-[1]"
+                      style={{ height: 39, boxSizing: 'border-box' }}
+                      onClick={() =>
+                        setQualCollapsed((prev) => {
+                          const next = new Set(prev)
+                          if (next.has(group.label)) next.delete(group.label)
+                          else next.add(group.label)
+                          return next
+                        })
+                      }
+                    >
+                      {group.icon === 'setting-config' && (
+                        <SettingConfig
+                          size={14}
+                          theme="two-tone"
+                          fill={['var(--text)', 'rgba(255,255,255,0.2)']}
+                          style={{ marginTop: 1, marginLeft: -2 }}
+                        />
+                      )}
+                      {group.icon === 'compass' && (
+                        <Compass
+                          size={14}
+                          theme="two-tone"
+                          fill={['var(--text)', 'rgba(255,255,255,0.2)']}
+                          style={{ marginTop: 1, marginLeft: -2 }}
+                        />
+                      )}
+                      <span className="text-[10px] uppercase tracking-wider font-bold flex-1 text-text">
+                        {group.label}
+                      </span>
+                      {activeInGroup > 0 && (
+                        <InfoChip color={TAB_COLORS.qualifiers}>
+                          <span className="font-bold">{activeInGroup}</span>
+                        </InfoChip>
+                      )}
+                      {isGroupCollapsed ? (
+                        <Right
+                          size={12}
+                          theme="two-tone"
+                          fill={['currentColor', 'currentColor']}
+                          className="text-text-dim"
+                        />
+                      ) : (
+                        <Down
+                          size={12}
+                          theme="two-tone"
+                          fill={['currentColor', 'currentColor']}
+                          className="text-text-dim"
+                        />
+                      )}
+                    </div>
+                    {!isGroupCollapsed &&
+                      filteredQuals.map((q, qi) => (
                         <div
-                          className="w-[14px] h-[14px] shrink-0 rounded-[3px] flex items-center justify-center transition-[background] duration-100"
+                          key={q.id}
+                          className="flex items-center gap-2 px-3 py-[6px]"
                           style={{
-                            background: isSelected
-                              ? tab === 'avoid'
-                                ? TAB_COLORS.avoid
-                                : TAB_COLORS.want
-                              : 'rgba(255,255,255,0.1)',
+                            background:
+                              qualifiers[q.id] != null && qualifiers[q.id]! > 0
+                                ? 'rgba(129,199,132,0.08)'
+                                : qi % 2 === 0
+                                  ? 'rgba(255,255,255,0.02)'
+                                  : 'transparent',
                           }}
                         >
-                          {isSelected && (
-                            <span className="text-[10px] text-[#171821] font-bold leading-none">&#10003;</span>
-                          )}
-                        </div>
-                        <span
-                          className="text-[11px] flex-1"
-                          style={{ color: isSelected ? 'var(--text)' : 'var(--text-dim)' }}
-                        >
-                          {formatModText(m.text)}
-                        </span>
-                        {m.nightmare && (
-                          <span className="text-[8px] font-semibold shrink-0" style={{ color: TAB_COLORS.avoid }}>
-                            NM
+                          <span
+                            className="text-[11px] flex-1"
+                            style={{
+                              color:
+                                qualifiers[q.id] != null && qualifiers[q.id]! > 0 ? 'var(--text)' : 'var(--text-dim)',
+                            }}
+                          >
+                            {q.label}
                           </span>
-                        )}
-                      </div>
-                    )
-                  })}
-              </div>
-            )
-          })}
+                          <ScrubInput
+                            value={qualifiers[q.id] ?? null}
+                            placeholder="--"
+                            step={optimizeNumbers ? 10 : 1}
+                            onChange={(val) => {
+                              const snapped =
+                                optimizeNumbers && val != null && val > 0 ? Math.floor(val / 10) * 10 || val : val
+                              setQualifiers((prev) => ({ ...prev, [q.id]: snapped }))
+                            }}
+                          />
+                        </div>
+                      ))}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Mod list (avoid/want) */}
+          {(tab === 'avoid' || tab === 'want') && (
+            <div className="flex-1 overflow-y-auto bg-bg-card">
+              {grouped.map(({ mods, label, color, key }) => {
+                const isCollapsed = collapsed.has(key)
+                const selectedInGroup = mods.filter((m) => selected.has(m.id)).length
+                return (
+                  <div key={key}>
+                    <div
+                      className="flex items-center gap-2 px-3 py-[8px] sticky-group-header cursor-pointer select-none sticky top-0 z-[1]"
+                      style={{ height: 39, boxSizing: 'border-box' }}
+                      onClick={() => toggleCollapse(key)}
+                    >
+                      <div className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
+                      <span className="text-[10px] uppercase tracking-wider font-bold flex-1" style={{ color }}>
+                        {label}
+                      </span>
+                      {selectedInGroup > 0 && (
+                        <InfoChip color={color}>
+                          <span className="font-bold">{selectedInGroup}</span>
+                        </InfoChip>
+                      )}
+                      {isCollapsed ? (
+                        <Right
+                          size={12}
+                          theme="two-tone"
+                          fill={['currentColor', 'currentColor']}
+                          className="text-text-dim"
+                        />
+                      ) : (
+                        <Down
+                          size={12}
+                          theme="two-tone"
+                          fill={['currentColor', 'currentColor']}
+                          className="text-text-dim"
+                        />
+                      )}
+                    </div>
+                    {!isCollapsed &&
+                      mods.map((m, mi) => {
+                        const isSelected = selected.has(m.id)
+                        return (
+                          <div
+                            key={m.id}
+                            onClick={() => toggle(m.id)}
+                            className="flex items-center gap-2 px-3 py-[4px] cursor-pointer select-none transition-colors"
+                            style={{
+                              background: isSelected
+                                ? tab === 'avoid'
+                                  ? 'rgba(239,83,80,0.08)'
+                                  : 'rgba(129,199,132,0.08)'
+                                : mi % 2 === 0
+                                  ? 'rgba(255,255,255,0.02)'
+                                  : 'transparent',
+                            }}
+                          >
+                            <div
+                              className="w-[14px] h-[14px] shrink-0 rounded-[3px] flex items-center justify-center transition-[background] duration-100"
+                              style={{
+                                background: isSelected
+                                  ? tab === 'avoid'
+                                    ? TAB_COLORS.avoid
+                                    : TAB_COLORS.want
+                                  : 'rgba(255,255,255,0.1)',
+                              }}
+                            >
+                              {isSelected && (
+                                <span className="text-[10px] text-[#171821] font-bold leading-none">&#10003;</span>
+                              )}
+                            </div>
+                            <span
+                              className="text-[11px] flex-1"
+                              style={{ color: isSelected ? 'var(--text)' : 'var(--text-dim)' }}
+                            >
+                              {formatModText(m.text)}
+                            </span>
+                            {m.nightmare && (
+                              <span className="text-[8px] font-semibold shrink-0" style={{ color: TAB_COLORS.avoid }}>
+                                NM
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Custom generator */}
+      {generator === 'custom' && (
+        <div className="flex-1 flex flex-col bg-bg-card px-3 py-3">
+          <textarea
+            value={customRegexInput}
+            onChange={(e) => setCustomRegexInput(e.target.value)}
+            placeholder="Paste or type your custom regex"
+            className="flex-1 w-full text-[12px] font-mono bg-black/30 rounded px-3 py-2 resize-none text-text outline-none"
+            style={{ minHeight: 120, border: '1px solid rgba(0,0,0,0.3)' }}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(0,0,0,0.5)'
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(0,0,0,0.3)'
+            }}
+          />
         </div>
       )}
     </div>
