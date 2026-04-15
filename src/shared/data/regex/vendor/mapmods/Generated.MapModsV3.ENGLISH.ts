@@ -63,7 +63,7 @@ export const regexMapModsENGLISH: Regex<MapModsTokenOption> = {
     },
     {
       id: -1629200695,
-      regex: 'tab',
+      regex: 'nsta',
       rawText: 'Area contains Unstable Tentacle Fiends',
       generalizedText: '^area contains unstable tentacle fiends$',
       options: { scary: 1001, nm: true },
@@ -1374,8 +1374,8 @@ export const regexMapModsENGLISH: Regex<MapModsTokenOption> = {
     },
     '-1139261923:-128171261:472035128:1062763755:1211148661': {
       ids: [-1139261923, -128171261, 472035128, 1062763755, 1211148661],
-      regex: 'as p',
-      weight: 6,
+      regex: 'has p',
+      weight: 7,
       count: 5,
     },
     '-1139261923:1062763755': { ids: [-1139261923, 1062763755], regex: 's of c', weight: 8, count: 2 },
@@ -1501,11 +1501,11 @@ export const regexMapModsENGLISH: Regex<MapModsTokenOption> = {
     },
     '-931745379:10729340:1428847539:1932675161': {
       ids: [-931745379, 10729340, 1428847539, 1932675161],
-      regex: 'infl',
+      regex: 'nfli',
       weight: 4,
       count: 4,
     },
-    '-931745379:10729340': { ids: [-931745379, 10729340], regex: 's inf', weight: 7, count: 2 },
+    '-931745379:10729340': { ids: [-931745379, 10729340], regex: 'rs inf', weight: 8, count: 2 },
     '-763914456:-105914721:1333860371': {
       ids: [-763914456, -105914721, 1333860371],
       regex: 'ask',
@@ -1527,7 +1527,6 @@ export const regexMapModsENGLISH: Regex<MapModsTokenOption> = {
       count: 4,
     },
     '-645418310:10729340:775962019': { ids: [-645418310, 10729340, 775962019], regex: 'ei', weight: 2, count: 3 },
-    '-645418310:639399394:1932675161': { ids: [-645418310, 639399394, 1932675161], regex: 'ndom', weight: 4, count: 3 },
     '-645418310:639399394': { ids: [-645418310, 639399394], regex: 'a r', weight: 5, count: 2 },
     '-645418310:-258709095:10729340:127168403:823410479': {
       ids: [-645418310, -258709095, 10729340, 127168403, 823410479],

@@ -355,6 +355,25 @@ body.dragging * {
   cursor: grabbing !important;
 }
 
+.sortable-fallback {
+  opacity: 0.8 !important;
+  cursor: grabbing !important;
+}
+
+.sortable-ghost .preset-controls,
+.sortable-chosen .preset-controls {
+  opacity: 0 !important;
+}
+
+.preset-slider {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  user-select: none;
+}
+.preset-slider::-webkit-scrollbar {
+  display: none;
+}
+
 .rate-limit-bar:hover .rate-limit-tooltip {
   opacity: 1 !important;
 }

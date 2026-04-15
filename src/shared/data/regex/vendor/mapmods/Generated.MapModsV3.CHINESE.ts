@@ -92,7 +92,7 @@ export const regexMapModsCHINESE: Regex<MapModsTokenOption> = {
     {
       id: -1430865583,
       regex: '通',
-      rawText: '怪物反射 20% 物理傷害|怪物反射 20% 元素傷害|區域中掉落的通貨增加 47%',
+      rawText: '怪��反射 20% 物理傷害|怪物反射 20% 元素傷害|區域中掉落的通貨增加 47%',
       generalizedText: '^怪物反射 #% 物理傷害$|^怪物反射 #% 元素傷害$|^區域中掉落的通貨增加 #%$',
       options: { scary: 1001, nm: true },
     },
@@ -506,7 +506,7 @@ export const regexMapModsCHINESE: Regex<MapModsTokenOption> = {
       id: 472035128,
       regex: '道增',
       rawText: '區域內有數道增加 (20-50)% 承受傷害的感電地面',
-      generalizedText: '^區域內有數道增加 #% 承受傷害的感電地面$',
+      generalizedText: '^區域內有數道增加 #% 承受傷害的感��地面$',
       options: { scary: 310, nm: false },
     },
     {
@@ -792,7 +792,7 @@ export const regexMapModsCHINESE: Regex<MapModsTokenOption> = {
     {
       id: 1756122717,
       regex: '干',
-      rawText: '釋界干擾玩家',
+      rawText: '釋���干擾玩家',
       generalizedText: '^釋界干擾玩家$',
       options: { scary: 1001, nm: true },
     },
@@ -1178,7 +1178,7 @@ export const regexMapModsCHINESE: Regex<MapModsTokenOption> = {
     },
     '-1616686189:-477049138:646965355:1205583947': {
       ids: [-1616686189, -477049138, 646965355, 1205583947],
-      regex: '最',
+      regex: '��',
       weight: 1,
       count: 4,
     },

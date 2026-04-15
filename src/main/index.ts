@@ -85,6 +85,7 @@ const store = new Store<AppSettings>({
     appMacros: [],
     stashScrollEnabled: false,
     poeVersion: 1,
+    regexPresets: [],
   },
 })
 
@@ -125,6 +126,15 @@ onlineSyncHandlers.register(store)
 pricesHandlers.register(store)
 
 ipcMain.on('close-overlay', () => hideOverlay())
+ipcMain.on('open-devtools', (event) => {
+  // Only open devtools on the app window (overlay devtools breaks the transparent overlay)
+  const app = getAppWindow()
+  if (app && !app.isDestroyed()) {
+    app.webContents.openDevTools({ mode: 'detach' })
+  } else {
+    event.sender.openDevTools({ mode: 'detach' })
+  }
+})
 
 // ---- System tray -----------------------------------------------------------
 

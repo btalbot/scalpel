@@ -54,4 +54,12 @@ export function register(store: Store<AppSettings>): void {
     store.set('regexPresets', filtered)
     return filtered
   })
+
+  ipcMain.handle('reorder-regex-presets', (_event, ids: string[]) => {
+    const presets = (store.get('regexPresets') as RegexPreset[] | undefined) ?? []
+    const byId = new Map(presets.map((p) => [p.id, p]))
+    const reordered = ids.map((id) => byId.get(id)).filter(Boolean) as RegexPreset[]
+    store.set('regexPresets', reordered)
+    return reordered
+  })
 }

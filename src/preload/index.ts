@@ -109,6 +109,9 @@ export const api = {
   finishOnboarding: (): Promise<void> => ipcRenderer.invoke('finish-onboarding'),
   setAppWindowMode: (mode: 'onboarding' | 'settings'): void => ipcRenderer.send('app-window-mode', mode),
 
+  // Dev tools
+  openDevTools: (): void => ipcRenderer.send('open-devtools'),
+
   // Overlay control
   closeOverlay: (): void => ipcRenderer.send('close-overlay'),
   getOverlayState: (): Promise<{
@@ -130,6 +133,8 @@ export const api = {
     ipcRenderer.invoke('save-regex-preset', preset),
   deleteRegexPreset: (id: string): Promise<import('../shared/types').RegexPreset[]> =>
     ipcRenderer.invoke('delete-regex-preset', id),
+  reorderRegexPresets: (ids: string[]): Promise<import('../shared/types').RegexPreset[]> =>
+    ipcRenderer.invoke('reorder-regex-presets', ids),
 
   // Event subscriptions
   onOverlayData: (cb: (data: OverlayData) => void): (() => void) => {

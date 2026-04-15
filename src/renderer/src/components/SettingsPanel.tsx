@@ -69,6 +69,11 @@ export function SettingsPanel({
               Setup Wizard
             </button>
           )}
+          {import.meta.env.DEV && (
+            <button onClick={() => window.api.openDevTools()} className="text-[11px] text-text-dim px-3 py-1.5">
+              DevTools
+            </button>
+          )}
         </div>
       </div>
 

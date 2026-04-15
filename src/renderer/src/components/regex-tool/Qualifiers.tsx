@@ -22,12 +22,12 @@ export const QUALIFIER_GROUPS: QualifierGroup[] = [
     icon: 'setting-config',
     defaultOpen: true,
     qualifiers: [
-      { id: 'quantity', label: 'Quantity', keyword: 'm q', suffix: '%' },
-      { id: 'packsize', label: 'Pack Size', keyword: 'ack s', suffix: '%' },
+      { id: 'quantity', label: 'Quantity', keyword: 'm q', suffix: '%' }, // poe.re: "m q.*"
+      { id: 'packsize', label: 'Pack Size', keyword: 'iz', suffix: '%' }, // poe.re: "iz.*"
       { id: 'morecurrency', label: 'More Currency', keyword: 'ore cu', suffix: '%' },
       { id: 'morescarabs', label: 'More Scarabs', keyword: 'ore sc', suffix: '%' },
-      { id: 'moremaps', label: 'More Maps', keyword: 'ore ma', suffix: '%' },
-      { id: 'rarity', label: 'Item Rarity', keyword: 'm r', suffix: '%' },
+      { id: 'moremaps', label: 'More Maps', keyword: 're maps', suffix: '%' }, // poe.re: "re maps.*"
+      { id: 'rarity', label: 'Item Rarity', keyword: 'm rar', suffix: '%' }, // poe.re: "m rar.*"
     ],
   },
   {
@@ -35,12 +35,12 @@ export const QUALIFIER_GROUPS: QualifierGroup[] = [
     icon: 'compass',
     defaultOpen: false,
     qualifiers: [
-      { id: 'quality', label: 'Quality', keyword: 'lity:', suffix: '%' },
-      { id: 'quality_packsize', label: 'Maven Quality - Pack Size', keyword: 'ack s', suffix: '%' },
-      { id: 'quality_rarity', label: 'Maven Quality - Rarity', keyword: 'rity', suffix: '%' },
-      { id: 'quality_currency', label: 'Maven Quality - Currency', keyword: 'rren', suffix: '%' },
-      { id: 'quality_divination', label: 'Maven Quality - Divination Cards', keyword: 'ivin', suffix: '%' },
-      { id: 'quality_scarab', label: 'Maven Quality - Scarabs', keyword: 'arab', suffix: '%' },
+      { id: 'quality', label: 'Quality', keyword: 'ty \\(Quantity\\):', suffix: '%' }, // poe.re: "ty (Quantity):.*"
+      { id: 'quality_packsize', label: 'Maven Quality - Pack Size', keyword: 'ze\\)', suffix: '%' }, // poe.re: "ze).*"
+      { id: 'quality_rarity', label: 'Maven Quality - Rarity', keyword: 'ty\\)', suffix: '%' }, // poe.re: "ty).*"
+      { id: 'quality_currency', label: 'Maven Quality - Currency', keyword: 'urr', suffix: '%' }, // poe.re: "urr.*"
+      { id: 'quality_divination', label: 'Maven Quality - Divination Cards', keyword: 'div', suffix: '%' }, // poe.re: "div.*"
+      { id: 'quality_scarab', label: 'Maven Quality - Scarabs', keyword: 'sca', suffix: '%' }, // poe.re: "sca.*"
     ],
   },
 ]

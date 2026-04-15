@@ -11,6 +11,17 @@ export interface MapMod {
   nightmare: boolean
 }
 
+/** Override danger level for specific mods by ID */
+const DANGER_OVERRIDES: Record<number, Danger> = {
+  [955801458]: 'beneficial', // Area contains two Unique Bosses
+  [-1647756153]: 'beneficial', // Rare Monsters each have 1 additional Modifier|increased number of Rare Monsters
+}
+
+/** Mods that are nightmare but should be grouped with regular mods (not in the nightmare section) */
+export const NIGHTMARE_REGROUPED: Set<number> = new Set([
+  -1647756153, // Rare Monsters each have 1 additional Modifier|increased number of Rare Monsters
+])
+
 function scaryToDanger(scary: number): Danger {
   if (scary >= 600) return 'lethal'
   if (scary >= 370) return 'dangerous'
@@ -32,7 +43,7 @@ function tokensToMods(data: Regex<MapModsTokenOption>): MapMod[] {
     id: t.id,
     regex: t.regex,
     text: formatText(t.rawText),
-    danger: scaryToDanger(t.options.scary),
+    danger: DANGER_OVERRIDES[t.id] ?? scaryToDanger(t.options.scary),
     nightmare: t.options.nm,
   }))
 }

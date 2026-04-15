@@ -1,5 +1,12 @@
-import { useState, useEffect } from 'react'
-import { MAP_MODS, DANGER_COLORS, DANGER_LABELS, type Danger } from '../../../../shared/data/regex/map-mods'
+import { useState, useEffect, useRef } from 'react'
+import { ReactSortable } from 'react-sortablejs'
+import {
+  MAP_MODS,
+  DANGER_COLORS,
+  DANGER_LABELS,
+  NIGHTMARE_REGROUPED,
+  type Danger,
+} from '../../../../shared/data/regex/map-mods'
 import { buildMapRegex, POE_REGEX_MAX_LENGTH } from './regex-engine'
 import { buildQualifierRegex, QUALIFIERS, QUALIFIER_GROUPS, type QualifierValues } from './Qualifiers'
 import {
@@ -13,11 +20,14 @@ import {
   Compass,
   Search,
   Save,
+  Drag,
 } from '@icon-park/react'
 import poereIconTight from '../../assets/other/poere-logo-tight.svg'
 import { FilterChip } from '../price-check/FilterChip'
 import { InfoChip } from '../../shared/PriceChip'
 import { ScrubInput } from './ScrubInput'
+import { generatePresetTags, CUSTOM_TAG_COLOR } from './preset-tags'
+import type { RegexPreset, RegexPresetTag } from '../../../../shared/types'
 
 const DANGER_ORDER: Danger[] = ['lethal', 'dangerous', 'annoying', 'mild', 'harmless', 'beneficial']
 
@@ -35,12 +45,65 @@ function formatModText(text: string): string {
 type Tab = 'qualifiers' | 'avoid' | 'want'
 type WantMode = 'any' | 'all'
 
-function loadSet(key: string): Set<number> {
+function loadStorage<T>(key: string, fallback: T, parse: (s: string) => T = JSON.parse): T {
   try {
     const saved = localStorage.getItem(key)
-    return saved ? new Set(JSON.parse(saved) as number[]) : new Set()
+    return saved != null ? parse(saved) : fallback
   } catch {
-    return new Set()
+    return fallback
+  }
+}
+
+function loadSet(key: string): Set<number> {
+  return new Set(loadStorage<number[]>(key, []))
+}
+
+/** Icon for a preset tag source type */
+function TagSourceIcon({ source, size = 12 }: { source?: string; size?: number }): JSX.Element | null {
+  const fill: [string, string] = ['currentColor', 'rgba(255,255,255,0.2)']
+  const style = { marginTop: size > 10 ? 1 : 0, marginLeft: size > 10 ? -2 : -1 }
+  if (source === 'qualifier') return <AddOne size={size} theme="two-tone" fill={fill} style={style} />
+  if (source === 'avoid') return <Forbid size={size} theme="two-tone" fill={fill} style={style} />
+  if (source === 'want') return <CheckOne size={size} theme="two-tone" fill={fill} style={style} />
+  return null
+}
+
+/** Attach momentum-based drag-to-scroll to an element */
+function useMomentumScroll(ignoreSelectors: string[] = []) {
+  return (e: React.MouseEvent<HTMLDivElement>) => {
+    if (ignoreSelectors.some((s) => (e.target as HTMLElement).closest(s))) return
+    const el = e.currentTarget
+    const startX = e.pageX
+    const scrollLeft = el.scrollLeft
+    let moved = false
+    let velocity = 0
+    let lastX = startX
+    let lastTime = Date.now()
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.pageX - startX
+      if (Math.abs(dx) > 3) moved = true
+      const now = Date.now()
+      const dt = now - lastTime
+      if (dt > 0) velocity = (ev.pageX - lastX) / dt
+      lastX = ev.pageX
+      lastTime = now
+      el.scrollLeft = scrollLeft - dx
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      if (!moved) return
+      let v = velocity * 15
+      const decay = () => {
+        if (Math.abs(v) < 0.5) return
+        el.scrollLeft -= v
+        v *= 0.92
+        requestAnimationFrame(decay)
+      }
+      requestAnimationFrame(decay)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
   }
 }
 
@@ -48,33 +111,22 @@ export function MapMods(): JSX.Element {
   const [tab, setTab] = useState<Tab>('qualifiers')
   const [avoid, setAvoid] = useState<Set<number>>(() => loadSet('scalpel:regex:map-avoid'))
   const [want, setWant] = useState<Set<number>>(() => loadSet('scalpel:regex:map-want'))
-  const [wantMode, setWantMode] = useState<WantMode>(() => {
-    try {
-      return (localStorage.getItem('scalpel:regex:map-want-mode') as WantMode) ?? 'any'
-    } catch {
-      return 'any'
-    }
-  })
-  const [qualifiers, setQualifiers] = useState<QualifierValues>(() => {
-    try {
-      const saved = localStorage.getItem('scalpel:regex:qualifiers')
-      return saved ? JSON.parse(saved) : {}
-    } catch {
-      return {}
-    }
-  })
-  const [showNightmare, setShowNightmare] = useState(() => {
-    try {
-      return localStorage.getItem('scalpel:regex:nightmare') === 'true'
-    } catch {
-      return false
-    }
-  })
+  const [wantMode, setWantMode] = useState<WantMode>(() =>
+    loadStorage('scalpel:regex:map-want-mode', 'any' as WantMode, (s) => s as WantMode),
+  )
+  const [qualifiers, setQualifiers] = useState<QualifierValues>(() => loadStorage('scalpel:regex:qualifiers', {}))
+  const [optimizeNumbers, setOptimizeNumbers] = useState(() =>
+    loadStorage('scalpel:regex:optimize', true, (s) => s !== 'false'),
+  )
+  const [showNightmare, setShowNightmare] = useState(() =>
+    loadStorage('scalpel:regex:nightmare', false, (s) => s === 'true'),
+  )
   const [search, setSearch] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [presetsOpen, setPresetsOpen] = useState(false)
-  const [presetName, setPresetName] = useState('')
-  const [presets, setPresets] = useState<import('../../../../shared/types').RegexPreset[]>([])
+  const [presetTags, setPresetTags] = useState<(RegexPresetTag & { id: number })[]>([])
+  const [customTagInput, setCustomTagInput] = useState('')
+  const [presets, setPresets] = useState<RegexPreset[]>([])
   const [copied, setCopied] = useState(false)
   const [avoidCollapsed, setAvoidCollapsed] = useState<Set<string>>(
     new Set(['dangerous', 'annoying', 'mild', 'harmless', 'beneficial']),
@@ -102,7 +154,19 @@ export function MapMods(): JSX.Element {
     localStorage.setItem('scalpel:regex:nightmare', String(showNightmare))
   }, [showNightmare])
   useEffect(() => {
-    window.api.getRegexPresets().then(setPresets)
+    localStorage.setItem('scalpel:regex:optimize', String(optimizeNumbers))
+  }, [optimizeNumbers])
+  useEffect(() => {
+    window.api.getRegexPresets().then((loaded) => {
+      // Migrate old presets that used 'name' instead of 'tags'
+      setPresets(
+        loaded.map((p) =>
+          p.tags
+            ? p
+            : { ...p, tags: [{ text: (p as unknown as { name: string }).name || 'preset', color: CUSTOM_TAG_COLOR }] },
+        ),
+      )
+    })
   }, [])
 
   const selected = tab === 'avoid' ? avoid : want
@@ -117,9 +181,10 @@ export function MapMods(): JSX.Element {
   const dangerOrder = tab === 'want' ? [...DANGER_ORDER].reverse() : DANGER_ORDER
   const WANT_PRIORITY = new Set([583869527, -683043845, -1647756153]) // magic monsters, rare monsters, rare+modifier
 
-  // Split nightmare mods into their own group when the chip is on
-  const nonNightmareMods = visibleMods.filter((m) => !m.nightmare)
-  const nightmareMods = showNightmare ? visibleMods.filter((m) => m.nightmare) : []
+  // Split nightmare mods into their own group when the chip is on.
+  // Regrouped nightmare mods go with regular mods but still show NM badge and respect the toggle.
+  const nonNightmareMods = visibleMods.filter((m) => !m.nightmare || NIGHTMARE_REGROUPED.has(m.id))
+  const nightmareMods = showNightmare ? visibleMods.filter((m) => m.nightmare && !NIGHTMARE_REGROUPED.has(m.id)) : []
 
   const regularGroups = dangerOrder
     .map((danger) => {
@@ -183,11 +248,78 @@ export function MapMods(): JSX.Element {
     setTimeout(() => setCopied(false), 1500)
   }
 
+  // Seed tags when presets panel first opens
+  useEffect(() => {
+    if (presetsOpen && presetTags.length === 0) {
+      setPresetTags(generatePresetTags({ avoid, want, qualifiers }).map((t, i) => ({ ...t, id: i })))
+      setCustomTagInput('')
+    }
+  }, [presetsOpen])
+
+  // Keep auto-generated tags in sync with live state while panel is open.
+  // Custom tags and tag order are preserved.
+  useEffect(() => {
+    if (!presetsOpen) return
+    const fresh = generatePresetTags({ avoid, want, qualifiers })
+    setPresetTags((prev) => {
+      // Build a set of fresh sourceIds
+      const freshBySourceId = new Map<string | number, (typeof fresh)[0]>()
+      fresh.forEach((t) => {
+        if (t.sourceId != null) freshBySourceId.set(t.sourceId, t)
+      })
+
+      // Update existing, remove stale
+      const updated = prev
+        .filter((t) => {
+          if (t.source === 'custom' || t.sourceId == null) return true
+          return freshBySourceId.has(t.sourceId)
+        })
+        .map((t) => {
+          if (t.source === 'custom' || t.sourceId == null) return t
+          const freshTag = freshBySourceId.get(t.sourceId)
+          if (freshTag && freshTag.text !== t.text) {
+            return { ...t, text: freshTag.text, color: freshTag.color }
+          }
+          return t
+        })
+
+      // Add new tags at the end
+      let nextId = Math.max(0, ...prev.map((t) => t.id)) + 1
+      const existingSourceIds = new Set(updated.filter((t) => t.sourceId != null).map((t) => t.sourceId))
+      for (const ft of fresh) {
+        if (ft.sourceId != null && !existingSourceIds.has(ft.sourceId)) {
+          updated.push({ ...ft, id: nextId++ })
+        }
+      }
+
+      return updated
+    })
+  }, [presetsOpen, avoid, want, qualifiers])
+
+  const removePresetTag = (index: number) => {
+    setPresetTags((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const addCustomTag = () => {
+    const text = customTagInput.trim()
+    if (!text) return
+    setPresetTags((prev) => [...prev, { text, color: CUSTOM_TAG_COLOR, id: Date.now() }])
+    setCustomTagInput('')
+  }
+
   const savePreset = async () => {
-    if (!presetName.trim()) return
-    const preset: import('../../../../shared/types').RegexPreset = {
+    if (presetTags.length === 0) return
+    // Detect dupes by sorted tag text (order-independent)
+    const tagKey = [...presetTags.map((t) => t.text)].sort().join('|')
+    const existingDupe = presets.find((p) => [...p.tags.map((t) => t.text)].sort().join('|') === tagKey)
+    if (existingDupe) {
+      // Same tags, different order -- update the existing preset with new order
+      const updated = await window.api.deleteRegexPreset(existingDupe.id)
+      setPresets(updated)
+    }
+    const preset: RegexPreset = {
       id: crypto.randomUUID(),
-      name: presetName.trim(),
+      tags: presetTags,
       avoid: [...avoid],
       want: [...want],
       wantMode,
@@ -196,10 +328,13 @@ export function MapMods(): JSX.Element {
     }
     const updated = await window.api.saveRegexPreset(preset)
     setPresets(updated)
-    setPresetName('')
+    setPresetTags([])
+    setCustomTagInput('')
   }
 
-  const loadPreset = (preset: import('../../../../shared/types').RegexPreset) => {
+  const loadPreset = (preset: RegexPreset) => {
+    // Use the saved tags in their saved order
+    setPresetTags((preset.tags || []).map((t, i) => ({ ...t, id: Date.now() + i })))
     setAvoid(new Set(preset.avoid))
     setWant(new Set(preset.want))
     setWantMode(preset.wantMode)
@@ -248,13 +383,30 @@ export function MapMods(): JSX.Element {
               }}
               className="flex items-center gap-1 no-underline"
             >
-              <img src={poereIconTight} alt="" className="w-[14px] h-[14px]" style={{ marginTop: -1 }} />
+              <img src={poereIconTight} alt="" className="w-[14px] h-[14px]" style={{ marginTop: 1, marginLeft: -2 }} />
               <span className="text-text-dim">Powered by poe.re</span>
             </a>
           </InfoChip>
-          <InfoChip size="sm" color={isOverLimit ? '#ef5350' : undefined}>
-            <span>
+          <InfoChip size="sm" color={isOverLimit ? '#ef5350' : undefined} className="!pr-[3px]">
+            <span className="flex items-center gap-1.5">
               {regex.length} / {POE_REGEX_MAX_LENGTH}
+              <button
+                onClick={() => {
+                  setAvoid(new Set())
+                  setWant(new Set())
+                  setQualifiers({})
+                }}
+                disabled={avoid.size === 0 && want.size === 0 && qualifierCount === 0}
+                className="text-[9px] font-semibold text-accent border-none rounded-full cursor-pointer px-2 py-[2px] bg-white/[0.08] disabled:opacity-30 disabled:cursor-default"
+                onMouseEnter={(e) => {
+                  if (!e.currentTarget.disabled) e.currentTarget.style.background = 'rgba(255,255,255,0.15)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
+                }}
+              >
+                Clear
+              </button>
             </span>
           </InfoChip>
         </div>
@@ -273,6 +425,7 @@ export function MapMods(): JSX.Element {
             onClick={() => {
               setSearchOpen((v) => !v)
               if (searchOpen) setSearch('')
+              if (!searchOpen) setPresetsOpen(false)
             }}
           />
           <FilterChip
@@ -282,7 +435,13 @@ export function MapMods(): JSX.Element {
               </>
             }
             active={presetsOpen}
-            onClick={() => setPresetsOpen((v) => !v)}
+            onClick={() => {
+              setPresetsOpen((v) => !v)
+              if (!presetsOpen) {
+                setSearchOpen(false)
+                setSearch('')
+              }
+            }}
           />
           {tab !== 'qualifiers' && (
             <FilterChip
@@ -290,16 +449,6 @@ export function MapMods(): JSX.Element {
               active={showNightmare}
               onClick={() => setShowNightmare((v) => !v)}
               color={TAB_COLORS.avoid}
-            />
-          )}
-          {((tab === 'qualifiers' && qualifierCount > 0) || (tab !== 'qualifiers' && selected.size > 0)) && (
-            <FilterChip
-              label="Clear"
-              active={false}
-              onClick={() => {
-                if (tab === 'qualifiers') setQualifiers({})
-                else setSelected(new Set())
-              }}
             />
           )}
         </div>
@@ -328,57 +477,167 @@ export function MapMods(): JSX.Element {
         <div
           className="overflow-hidden transition-all duration-150"
           style={{
-            maxHeight: presetsOpen ? 200 : 0,
+            maxHeight: presetsOpen ? 300 : 0,
             marginTop: presetsOpen ? 8 : 0,
             opacity: presetsOpen ? 1 : 0,
           }}
         >
           <div className="flex flex-col gap-2">
-            <div className="flex gap-1">
-              <input
-                type="text"
-                placeholder="Preset name..."
-                value={presetName}
-                onChange={(e) => setPresetName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') savePreset()
-                }}
-                className="flex-1 text-[11px] bg-black/30 rounded px-2 py-[5px] border-none"
-              />
+            {/* Save area -- setting-box style with tag chips and input inside */}
+            <div className="setting-box" style={{ flexWrap: 'wrap', gap: 4, padding: '6px 8px' }}>
+              <ReactSortable
+                list={presetTags}
+                setList={setPresetTags}
+                animation={150}
+                className="flex flex-wrap gap-1 flex-1 items-center min-w-0"
+                ghostClass="opacity-30"
+                filter=".no-drag"
+                preventOnFilter={false}
+                onStart={() => document.body.classList.add('dragging')}
+                onEnd={() => document.body.classList.remove('dragging')}
+              >
+                {presetTags.map((tag, i) => (
+                  <span
+                    key={tag.id}
+                    className="flex items-center gap-[5px] px-[6px] py-[2px] rounded text-[10px] font-semibold shrink-0 cursor-grab"
+                    style={{
+                      background: `${tag.color}cc`,
+                      color: '#fff',
+                      borderRadius: 2,
+                      textShadow: '0 1px 2px rgba(0,0,0,0.4)',
+                      paddingTop: 1,
+                      paddingBottom: 3,
+                    }}
+                  >
+                    <TagSourceIcon source={tag.source} size={12} />
+                    {tag.text}
+                    <CloseSmall
+                      size={13}
+                      theme="outline"
+                      fill="currentColor"
+                      className="cursor-pointer opacity-60 hover:opacity-100 -mr-[2px] ml-[1px]"
+                      onClick={() => removePresetTag(i)}
+                    />
+                  </span>
+                ))}
+                <input
+                  key="input"
+                  type="text"
+                  placeholder={presetTags.length === 0 ? 'Add tags...' : ''}
+                  value={customTagInput}
+                  onChange={(e) => setCustomTagInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || (e.key === ' ' && customTagInput.trim())) {
+                      e.preventDefault()
+                      addCustomTag()
+                    }
+                    if (e.key === 'Backspace' && !customTagInput && presetTags.length > 0) {
+                      removePresetTag(presetTags.length - 1)
+                    }
+                  }}
+                  className="no-drag flex-1 min-w-[60px] text-[11px] bg-transparent border-none outline-none text-text"
+                  style={{ padding: '2px 0' }}
+                />
+              </ReactSortable>
               <button
                 onClick={savePreset}
-                disabled={!presetName.trim()}
-                className="primary text-[11px] px-3 disabled:opacity-30 disabled:cursor-default"
+                disabled={presetTags.length === 0}
+                className="primary disabled:opacity-30 disabled:cursor-default shrink-0"
               >
                 Save
               </button>
             </div>
-            {presets.length > 0 && (
-              <div className="flex flex-col gap-[2px] max-h-[140px] overflow-y-auto">
-                {presets.map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center gap-2 px-2 py-[4px] rounded text-[11px] bg-black/20 hover:bg-black/30 transition-colors"
-                  >
-                    <span
-                      className="flex-1 truncate cursor-pointer text-text-dim hover:text-text transition-colors"
-                      onClick={() => loadPreset(p)}
-                    >
-                      {p.name}
-                    </span>
+          </div>
+          {/* close flex-col gap-2 */}
+        </div>
+        {/* close overflow-hidden */}
+      </div>
+      {/* close px-3 chips section */}
+      {/* Saved presets -- horizontal scrolling cards (outside px-3 and overflow-hidden) */}
+      {presets.length > 0 && presetsOpen && (
+        <div className="border-b border-border bg-bg-card py-2">
+          <span className="text-[9px] text-text-dim font-semibold uppercase tracking-wider ml-3 mb-1 block">
+            Saved Regex
+          </span>
+          <div
+            className="flex overflow-x-auto pb-1 preset-slider"
+            style={{ paddingLeft: 12 }}
+            onMouseDown={useMomentumScroll(['.preset-grab', '.preset-delete'])}
+          >
+            <ReactSortable
+              list={presets}
+              setList={(newList) => {
+                setPresets(newList)
+                window.api.reorderRegexPresets(newList.map((p) => p.id))
+              }}
+              animation={150}
+              handle=".preset-grab"
+              filter=".preset-delete"
+              preventOnFilter={false}
+              className="flex gap-2"
+            >
+              {presets.map((p) => (
+                <div
+                  key={p.id}
+                  className="flex shrink-0 rounded bg-black/20 hover:bg-black/30 transition-colors cursor-pointer relative group"
+                  style={{ width: 160, minHeight: 60 }}
+                  onClick={() => loadPreset(p)}
+                >
+                  {/* Left strip: X delete + grab handle */}
+                  <div className="flex flex-col items-center py-1.5 px-[3px] opacity-0 group-hover:opacity-100 transition-opacity preset-controls">
                     <div
-                      onClick={() => deletePreset(p.id)}
-                      className="cursor-pointer text-text-dim hover:text-[#ef5350] transition-colors shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        deletePreset(p.id)
+                      }}
+                      className="preset-delete cursor-pointer text-text-dim hover:text-[#ef5350] transition-colors"
                     >
-                      <CloseSmall size={14} theme="outline" fill="currentColor" />
+                      <CloseSmall size={11} theme="outline" fill="currentColor" />
+                    </div>
+                    <div
+                      className="preset-grab cursor-grab text-text-dim hover:text-text transition-colors flex-1 flex items-center justify-center"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Drag size={10} theme="outline" fill="currentColor" />
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
+                  <div className="flex-1 p-2 pl-0 min-w-0">
+                    <div
+                      className="flex flex-wrap gap-[3px]"
+                      style={{ maxHeight: 68, overflow: 'hidden' }}
+                      ref={(el) => {
+                        if (el) {
+                          el.style.webkitMaskImage =
+                            el.scrollHeight > el.clientHeight
+                              ? 'linear-gradient(to bottom, black 75%, transparent 100%)'
+                              : 'none'
+                        }
+                      }}
+                    >
+                      {p.tags.map((tag, i) => (
+                        <span
+                          key={i}
+                          className="flex items-center gap-[3px] px-[5px] py-[1px] text-[9px] font-semibold shrink-0"
+                          style={{
+                            background: `${tag.color}cc`,
+                            color: '#fff',
+                            borderRadius: 2,
+                            textShadow: '0 1px 2px rgba(0,0,0,0.4)',
+                          }}
+                        >
+                          <TagSourceIcon source={tag.source} size={8} />
+                          {tag.text}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </ReactSortable>
+            <div style={{ minWidth: 12, flexShrink: 0 }} />
           </div>
         </div>
-      </div>
+      )}
 
       {/* Qualifiers / Avoid / Want tabs */}
       <div className="flex gap-1 px-2 pt-1 pb-0 bg-bg-card">
@@ -430,6 +689,37 @@ export function MapMods(): JSX.Element {
           )
         })}
       </div>
+
+      {/* Qualifier optimization toggle */}
+      {tab === 'qualifiers' && (
+        <div
+          className="flex items-center gap-[6px] px-3 py-[6px] border-b border-border"
+          style={{ background: 'var(--bg-solid)' }}
+        >
+          <FilterChip
+            label="Regular"
+            active={!optimizeNumbers}
+            onClick={() => setOptimizeNumbers(false)}
+            color={TAB_COLORS.qualifiers}
+          />
+          <FilterChip
+            label="Optimized"
+            active={optimizeNumbers}
+            onClick={() => {
+              setOptimizeNumbers(true)
+              // Snap current values to 10s
+              setQualifiers((prev) => {
+                const snapped: QualifierValues = {}
+                for (const [k, v] of Object.entries(prev)) {
+                  snapped[k] = v != null && v > 0 ? Math.floor(v / 10) * 10 || v : v
+                }
+                return snapped
+              })
+            }}
+            color={TAB_COLORS.qualifiers}
+          />
+        </div>
+      )}
 
       {/* Want mode toggle */}
       {tab === 'want' && (
@@ -483,7 +773,7 @@ export function MapMods(): JSX.Element {
                       size={14}
                       theme="two-tone"
                       fill={['var(--text)', 'rgba(255,255,255,0.2)']}
-                      style={{ marginTop: -1 }}
+                      style={{ marginTop: 1, marginLeft: -2 }}
                     />
                   )}
                   {group.icon === 'compass' && (
@@ -491,7 +781,7 @@ export function MapMods(): JSX.Element {
                       size={14}
                       theme="two-tone"
                       fill={['var(--text)', 'rgba(255,255,255,0.2)']}
-                      style={{ marginTop: -1 }}
+                      style={{ marginTop: 1, marginLeft: -2 }}
                     />
                   )}
                   <span className="text-[10px] uppercase tracking-wider font-bold flex-1 text-text">{group.label}</span>
@@ -541,7 +831,12 @@ export function MapMods(): JSX.Element {
                       <ScrubInput
                         value={qualifiers[q.id] ?? null}
                         placeholder="--"
-                        onChange={(val) => setQualifiers((prev) => ({ ...prev, [q.id]: val }))}
+                        step={optimizeNumbers ? 10 : 1}
+                        onChange={(val) => {
+                          const snapped =
+                            optimizeNumbers && val != null && val > 0 ? Math.floor(val / 10) * 10 || val : val
+                          setQualifiers((prev) => ({ ...prev, [q.id]: snapped }))
+                        }}
                       />
                     </div>
                   ))}

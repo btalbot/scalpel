@@ -1,83 +1,76 @@
 /**
- * Generate a regex that matches any integer >= min.
- * Uses character classes and alternation to stay compact.
- * E.g. atLeast(80) -> "([89]\\d|\\d{3})"
- *      atLeast(150) -> "(1[5-9]\\d|[2-9]\\d{2}|\\d{4})"
+ * Generate a compact regex that matches any integer >= min.
+ * Matches poe.re's output style: uses `.` instead of `\d`, `..` instead of `\d{2}`,
+ * `[89]` instead of `[8-9]`, and caps at 3 digits (map mods don't exceed 999).
+ *
+ * Examples:
+ *   atLeastRegex(5)   -> "([5-9]|\\d.)"     matches 5-9 or any 2+ digit
+ *   atLeastRegex(70)  -> "([7-9].|\\d..)"    matches 70-99 or any 3-digit
+ *   atLeastRegex(75)  -> "(7[5-9]|[89].|\\d..)" matches 75-79, 80-99, or 100+
+ *   atLeastRegex(100) -> "\\d.."              any 3-digit number
+ *   atLeastRegex(150) -> "(1[5-9].|[2-9]..)" matches 150-199 or 200-999
  */
 export function atLeastRegex(min: number): string {
   if (min <= 0) return '\\d+'
   if (min <= 1) return '[1-9]\\d*'
 
   const parts: string[] = []
-  const digits = String(min)
-  const len = digits.length
+  const s = String(min)
 
-  // Handle the partial range in the same digit count as min
-  // e.g. for 150: 150-199, 200-999
-  addSameLength(min, Math.pow(10, len) - 1, parts)
+  if (s.length === 1) {
+    // Single digit: [N-9] or any 2-3 digit
+    parts.push(charRange(min, 9))
+    parts.push(dots(2))
+    parts.push(dots(3))
+  } else if (s.length === 2) {
+    const tens = Math.floor(min / 10)
+    const ones = min % 10
 
-  // All numbers with more digits are automatically >= min
-  parts.push(`\\d{${len + 1},}`)
-
-  if (parts.length === 1) return parts[0]
-  return `(${parts.join('|')})`
-}
-
-function addSameLength(min: number, max: number, parts: string[]): void {
-  const minStr = String(min)
-  const maxStr = String(max)
-  if (minStr.length !== maxStr.length) return
-
-  const len = minStr.length
-  if (len === 1) {
-    if (min === max) parts.push(String(min))
-    else if (min === 0 && max === 9) parts.push('\\d')
-    else parts.push(`[${min}-${max}]`)
-    return
-  }
-
-  const firstMin = parseInt(minStr[0])
-  const firstMax = parseInt(maxStr[0])
-
-  // Same first digit
-  if (firstMin === firstMax) {
-    const suffix = buildSuffix(minStr.slice(1), maxStr.slice(1))
-    parts.push(`${firstMin}${suffix}`)
-    return
-  }
-
-  // First digit range: handle the partial first bucket, full middle buckets, partial last bucket
-  // Partial first: e.g. for 150, handle 150-199
-  if (minStr.slice(1) !== '0'.repeat(len - 1)) {
-    const suffix = buildSuffix(minStr.slice(1), '9'.repeat(len - 1))
-    parts.push(`${firstMin}${suffix}`)
-    // Full middle buckets
-    if (firstMin + 1 <= firstMax) {
-      addFullRange(firstMin + 1, firstMax, len - 1, parts)
+    if (ones === 0) {
+      // Exact tens boundary: [T-9]. or ...
+      parts.push(`${charRange(tens, 9)}.`)
+    } else {
+      // Partial tens: T[O-9], then [T+1..9]., then ...
+      parts.push(`${tens}${charRange(ones, 9)}`)
+      if (tens + 1 <= 9) parts.push(`${charRange(tens + 1, 9)}.`)
     }
+    parts.push(dots(3))
   } else {
-    // min is exactly X000..., handle full range from firstMin
-    addFullRange(firstMin, firstMax, len - 1, parts)
-  }
-}
+    // 3 digits (100-999)
+    const hundreds = Math.floor(min / 100)
+    const remainder = min % 100
 
-function addFullRange(fromDigit: number, toDigit: number, suffixLen: number, parts: string[]): void {
-  const suffix = suffixLen === 1 ? '\\d' : `\\d{${suffixLen}}`
-  if (fromDigit === toDigit) {
-    parts.push(`${fromDigit}${suffix}`)
-  } else if (fromDigit === 0 && toDigit === 9) {
-    parts.push(`\\d${suffix}`)
-  } else {
-    parts.push(`[${fromDigit}-${toDigit}]${suffix}`)
-  }
-}
+    if (remainder === 0) {
+      // Exact hundreds boundary
+      parts.push(`${charRange(hundreds, 9)}..`)
+    } else {
+      const tens = Math.floor(remainder / 10)
+      const ones = remainder % 10
 
-function buildSuffix(minSuffix: string, maxSuffix: string): string {
-  if (minSuffix === '0'.repeat(minSuffix.length)) {
-    return minSuffix.length === 1 ? '\\d' : `\\d{${minSuffix.length}}`
+      if (ones === 0) {
+        // e.g. 150: 1[5-9]. then [2-9]..
+        parts.push(`${hundreds}${charRange(tens, 9)}.`)
+      } else {
+        // e.g. 175: 17[5-9], 1[8-9]., then [2-9]..
+        parts.push(`${hundreds}${tens}${charRange(ones, 9)}`)
+        if (tens + 1 <= 9) parts.push(`${hundreds}${charRange(tens + 1, 9)}.`)
+      }
+      if (hundreds + 1 <= 9) parts.push(`${charRange(hundreds + 1, 9)}..`)
+    }
   }
-  const parts: string[] = []
-  addSameLength(parseInt(minSuffix), parseInt(maxSuffix), parts)
+
   if (parts.length === 1) return parts[0]
   return `(${parts.join('|')})`
+}
+
+/** Character class or single char for a range */
+function charRange(from: number, to: number): string {
+  if (from === to) return String(from)
+  if (to - from === 1) return `[${from}${to}]`
+  return `[${from}-${to}]`
+}
+
+/** N dots */
+function dots(n: number): string {
+  return '.'.repeat(n)
 }

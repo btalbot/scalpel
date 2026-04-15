@@ -233,9 +233,16 @@ export interface InstallManifest {
   nativeModules: Record<string, string>
 }
 
+export interface RegexPresetTag {
+  text: string
+  color: string
+  source?: 'qualifier' | 'avoid' | 'want' | 'custom'
+  sourceId?: string | number
+}
+
 export interface RegexPreset {
   id: string
-  name: string
+  tags: RegexPresetTag[]
   avoid: number[]
   want: number[]
   wantMode: 'any' | 'all'

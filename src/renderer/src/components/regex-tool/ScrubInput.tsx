@@ -72,37 +72,37 @@ export function ScrubInput({
     }
   }
 
-  if (editing) {
-    return (
-      <input
-        ref={inputRef}
-        type="number"
-        value={editText}
-        onChange={(e) => setEditText(e.target.value)}
-        onBlur={commitEdit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') commitEdit()
-          if (e.key === 'Escape') setEditing(false)
-        }}
-        className="w-[60px] h-7 px-2 py-[2px] text-[13px] rounded-[3px] text-center bg-black/30 border border-accent"
-        min={min}
-        max={max}
-      />
-    )
-  }
-
   return (
     <div
-      onMouseDown={startScrub}
-      onClick={handleClick}
+      onMouseDown={editing ? undefined : startScrub}
+      onClick={editing ? undefined : handleClick}
       className="w-[70px] h-7 flex items-center justify-between px-2 rounded-[3px] text-[13px] select-none"
       style={{
         background: 'rgba(0,0,0,0.3)',
-        cursor: 'ew-resize',
+        cursor: editing ? 'text' : 'ew-resize',
         color: value != null && value > 0 ? 'var(--text)' : 'var(--text-dim)',
+        border: editing ? '1px solid rgba(0,0,0,0.2)' : '1px solid transparent',
       }}
     >
-      <span>{value ?? 0}</span>
+      {editing ? (
+        <input
+          ref={inputRef}
+          type="number"
+          value={editText}
+          onChange={(e) => setEditText(e.target.value)}
+          onBlur={commitEdit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitEdit()
+            if (e.key === 'Escape') setEditing(false)
+          }}
+          className="w-full bg-transparent border-none outline-none text-[13px] text-inherit"
+          style={{ padding: 0 }}
+          min={min}
+          max={max}
+        />
+      ) : (
+        <span>{value ?? 0}</span>
+      )}
       <SortFour size={11} theme="outline" fill="currentColor" style={{ transform: 'rotate(90deg)', opacity: 0.35 }} />
     </div>
   )
