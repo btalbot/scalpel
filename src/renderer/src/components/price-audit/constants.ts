@@ -1,4 +1,5 @@
 import { iconMap, divCardArtMap } from '../../shared/constants'
+import itemIcons from '../../../../shared/data/items/item-icons.json'
 import { formatDust, formatPrice } from '../../shared/utils'
 import dustValues from '../../../../shared/data/economy/dust-values.json'
 import baseToUniques from '../../../../shared/data/items/unique-info.json'
@@ -20,8 +21,7 @@ for (const [name, val] of Object.entries(_dustMap)) {
   if (!dustBaseMap[base] || val > dustBaseMap[base]) dustBaseMap[base] = val
 }
 
-export const mirrorIcon =
-  'https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lEdXBsaWNhdGUiLCJzY2FsZSI6MX1d/8d7fea29d1/CurrencyDuplicate.png'
+export const mirrorIcon = (itemIcons as Record<string, string>)['Mirror of Kalandra']
 
 // Module-level so they survive component remounts after batch moves
 export let lastMovedBelow: string | null = null

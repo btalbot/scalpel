@@ -281,6 +281,37 @@ export const api = {
   }> => ipcRenderer.invoke('bulk-exchange', itemName, baseType, haveId),
   checkBulkItem: (itemName: string, baseType: string, itemClass: string, rarity?: string): Promise<boolean> =>
     ipcRenderer.invoke('check-bulk-item', itemName, baseType, itemClass, rarity),
+  mapRegexTrade: (params: {
+    tier: number
+    avoidTexts: string[]
+    wantTexts: string[]
+    wantMode: 'any' | 'all'
+    qualifiers: Record<string, number>
+    nightmare: boolean
+  }): Promise<{
+    total: number
+    listings: Array<{
+      id: string
+      price: { amount: number; currency: string } | null
+      account: string
+      characterName?: string
+      online: boolean
+      instantBuyout: boolean
+      icon?: string
+      indexed?: string
+      itemData?: {
+        name?: string
+        baseType?: string
+        rarity?: string
+        explicitMods?: string[]
+        implicitMods?: string[]
+        ilvl?: number
+        mapProperties?: Array<{ name: string; value: string }>
+      }
+    }>
+    queryId: string
+    league: string
+  }> => ipcRenderer.invoke('map-regex-trade', params),
   visitHideout: (queryId: string, listingId: string, league: string): Promise<void> =>
     ipcRenderer.invoke('visit-hideout', queryId, listingId, league),
   whisperSeller: (queryId: string, listingId: string, league: string): Promise<void> =>

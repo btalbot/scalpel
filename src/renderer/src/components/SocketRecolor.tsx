@@ -8,13 +8,12 @@ import socketWhite from '../assets/sockets/socket-white.png'
 import socketLink from '../assets/sockets/socket-link.png'
 import itemClassesData from '../../../shared/data/items/item-classes.json'
 import { chaosIcon } from '../shared/icons'
+import itemIcons from '../../../shared/data/items/item-icons.json'
 
-const chromIcon =
-  'https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lSZXJvbGxTb2NrZXRDb2xvdXJzIiwic2NhbGUiOjF9XQ/19c8ddae20/CurrencyRerollSocketColours.png'
-const jewIcon =
-  'https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lSZXJvbGxTb2NrZXROdW1iZXJzIiwic2NhbGUiOjF9XQ/ba411ff58a/CurrencyRerollSocketNumbers.png'
-const fusIcon =
-  'https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lSZXJvbGxTb2NrZXRMaW5rcyIsInNjYWxlIjoxfV0/c5e1959880/CurrencyRerollSocketLinks.png'
+const icons = itemIcons as Record<string, string>
+const chromIcon = icons['Chromatic Orb']
+const jewIcon = icons["Jeweller's Orb"]
+const fusIcon = icons['Orb of Fusing']
 
 const SOCKET_IMG: Record<string, string> = { R: socketRed, G: socketGreen, B: socketBlue, W: socketWhite }
 const CYCLE: Record<string, string> = { R: 'G', G: 'B', B: 'R', W: 'R' }

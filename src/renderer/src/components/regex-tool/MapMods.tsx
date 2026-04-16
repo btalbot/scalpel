@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { ReactSortable } from 'react-sortablejs'
 import {
   MAP_MODS,
@@ -20,10 +20,14 @@ import {
   Compass,
   Search,
   Save,
+  Buy,
   Drag,
 } from '@icon-park/react'
 import poereIconTight from '../../assets/other/poere-logo-tight.svg'
+import itemIcons from '../../../../shared/data/items/item-icons.json'
 import { FilterChip } from '../price-check/FilterChip'
+import { TradeListings } from '../price-check/TradeListings'
+import type { Listing } from '../price-check/types'
 import { InfoChip } from '../../shared/PriceChip'
 import { ScrubInput } from './ScrubInput'
 import { generatePresetTags, CUSTOM_TAG_COLOR } from './preset-tags'
@@ -31,12 +35,57 @@ import type { RegexPreset, RegexPresetTag } from '../../../../shared/types'
 
 const DANGER_ORDER: Danger[] = ['lethal', 'dangerous', 'annoying', 'mild', 'harmless', 'beneficial']
 
+const icons = itemIcons as Record<string, string>
+const MAP_TIER_ICONS: Record<number | string, string> = Object.fromEntries([
+  ...Array.from({ length: 16 }, (_, i) => [i + 1, icons[`Map (Tier ${i + 1})`]]),
+  ['nightmare', icons['Nightmare Map']],
+])
+const ORIGINATOR_TIER_ICONS: Record<number, string> = Object.fromEntries(
+  Array.from({ length: 16 }, (_, i) => [i + 1, icons[`Zana Map (Tier ${i + 1})`]]),
+)
+
 const TAB_COLORS = {
   qualifiers: '#81c784',
   avoid: '#ef5350',
   want: '#81c784',
   nightmare: '#b71c1c',
 } as const
+
+function TierButton({
+  icon,
+  size,
+  title,
+  disabled,
+  onClick,
+}: {
+  icon: string
+  size: number
+  title: string
+  disabled?: boolean
+  onClick: () => void
+}): JSX.Element {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="flex flex-col items-center border-none cursor-pointer disabled:opacity-30"
+      style={{
+        background: 'rgba(255,255,255,0.05)',
+        borderRadius: 3,
+        padding: size > 30 ? '3px 3px 2px' : '2px 2px 1px',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'rgba(255,255,255,0.12)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
+      }}
+      title={title}
+    >
+      <img src={icon} alt={title} style={{ width: size, height: size, objectFit: 'contain' }} />
+    </button>
+  )
+}
 
 function formatModText(text: string): string {
   return text.replace(/\d+[-to ]*\d*%/g, '#%').replace(/\d+[-to ]*\d+/g, '#')
@@ -129,6 +178,8 @@ export function MapMods(): JSX.Element {
     savedTagsByGenerator.current[generator] = presetTags
     setPresetTags(savedTagsByGenerator.current[g] ?? [])
     setCustomTagInput('')
+    setShowTradeResults(false)
+    setShowTierPicker(false)
     _setGenerator(g)
   }
   const [tab, setTab] = useState<Tab>('qualifiers')
@@ -150,6 +201,61 @@ export function MapMods(): JSX.Element {
   const [presetTags, setPresetTags] = useState<(RegexPresetTag & { id: number })[]>([])
   const [customTagInput, setCustomTagInput] = useState('')
   const [customRegexInput, setCustomRegexInput] = useState('')
+  const [showTierPicker, setShowTierPicker] = useState(false)
+  const [showAllTiers, setShowAllTiers] = useState(false)
+  const [tradeSearching, setTradeSearching] = useState(false)
+  const [tradeListings, setTradeListings] = useState<Listing[]>([])
+  const [tradeTotal, setTradeTotal] = useState<number | null>(null)
+  const [tradeQueryId, setTradeQueryId] = useState<string | null>(null)
+  const [tradeLeague, setTradeLeague] = useState<string>('')
+  const [tradeError, setTradeError] = useState<string | null>(null)
+  const [expandedListing, setExpandedListing] = useState<string | null>(null)
+  const [actionStatus, setActionStatus] = useState<Record<string, 'pending' | 'success' | 'failed'>>({})
+  const [loggedIn, setLoggedIn] = useState(false)
+  const [showTradeResults, setShowTradeResults] = useState(false)
+  const priceChipMinWidth = useMemo(() => {
+    const maxDigits = tradeListings.reduce((max, l) => Math.max(max, l.price ? String(l.price.amount).length : 0), 0)
+    return 38 + maxDigits * 9
+  }, [tradeListings])
+
+  useEffect(() => {
+    window.api.poeCheckAuth().then((r) => setLoggedIn(r.loggedIn))
+  }, [])
+
+  const searchMapTrade = async (tier: number, nightmare: boolean) => {
+    setTradeSearching(true)
+    setTradeError(null)
+    setExpandedListing(null)
+    setActionStatus({})
+    try {
+      const avoidTexts = MAP_MODS.filter((m) => avoid.has(m.id)).map((m) => m.text)
+      const wantTexts = MAP_MODS.filter((m) => want.has(m.id)).map((m) => m.text)
+      const qualObj: Record<string, number> = {}
+      for (const [k, v] of Object.entries(qualifiers)) {
+        if (v != null && v > 0) qualObj[k] = v
+      }
+      const result = (await window.api.mapRegexTrade({
+        tier,
+        avoidTexts,
+        wantTexts,
+        wantMode,
+        qualifiers: qualObj,
+        nightmare,
+      })) as { total: number; listings: Listing[]; queryId: string; league: string }
+      setTradeListings(result.listings)
+      setTradeTotal(result.total)
+      setTradeQueryId(result.queryId)
+      setTradeLeague(result.league)
+      setShowTradeResults(true)
+    } catch (e) {
+      console.error('[regex] Trade search failed:', e)
+      setTradeError(e instanceof Error ? e.message : 'Search failed')
+      setShowTradeResults(true)
+    } finally {
+      setTradeSearching(false)
+      setShowTierPicker(false)
+    }
+  }
   const [presets, setPresets] = useState<RegexPreset[]>([])
   const [copied, setCopied] = useState(false)
   const [avoidCollapsed, setAvoidCollapsed] = useState<Set<string>>(
@@ -241,6 +347,11 @@ export function MapMods(): JSX.Element {
   const regex = generator === 'custom' ? customRegexInput : mapRegex
   const isOverLimit = regex.length > POE_REGEX_MAX_LENGTH
   const qualifierCount = QUALIFIERS.filter((q) => qualifiers[q.id] != null && qualifiers[q.id]! > 0).length
+  const hasMoreQualifier = ['morecurrency', 'morescarabs', 'moremaps'].some(
+    (k) => qualifiers[k] != null && qualifiers[k]! > 0,
+  )
+  const tierIcons = hasMoreQualifier ? ORIGINATOR_TIER_ICONS : MAP_TIER_ICONS
+  const hasNightmareMod = MAP_MODS.some((m) => m.nightmare && (avoid.has(m.id) || want.has(m.id)))
 
   useEffect(() => {
     window.api.reportRegex(regex)
@@ -513,7 +624,11 @@ export function MapMods(): JSX.Element {
               onClick={() => {
                 setSearchOpen((v) => !v)
                 if (searchOpen) setSearch('')
-                if (!searchOpen) setPresetsOpen(false)
+                if (!searchOpen) {
+                  setPresetsOpen(false)
+                  setShowTierPicker(false)
+                  setShowTradeResults(false)
+                }
               }}
             />
           )}
@@ -529,15 +644,40 @@ export function MapMods(): JSX.Element {
               if (!presetsOpen) {
                 setSearchOpen(false)
                 setSearch('')
+                setShowTierPicker(false)
+                setShowTradeResults(false)
               }
             }}
           />
-          {generator === 'maps' && tab !== 'qualifiers' && (
+          {generator === 'maps' && (
             <FilterChip
-              label="Nightmare"
-              active={showNightmare}
-              onClick={() => setShowNightmare((v) => !v)}
-              color={TAB_COLORS.avoid}
+              label={
+                <>
+                  <Buy size={12} theme="outline" fill="currentColor" /> {tradeSearching ? 'Searching...' : 'Trade'}
+                </>
+              }
+              active={showTierPicker || showTradeResults}
+              onClick={() => {
+                if (showTradeResults) {
+                  // Viewing results, turn off trade and go back to regex UI
+                  setShowTradeResults(false)
+                  setShowTierPicker(false)
+                } else if (tradeQueryId && !showTierPicker) {
+                  // Cached results exist, show them
+                  setShowTradeResults(true)
+                  setShowTierPicker(false)
+                  setSearchOpen(false)
+                  setSearch('')
+                  setPresetsOpen(false)
+                } else {
+                  setShowTierPicker((v) => !v)
+                  if (!showTierPicker) {
+                    setSearchOpen(false)
+                    setSearch('')
+                    setPresetsOpen(false)
+                  }
+                }
+              }}
             />
           )}
         </div>
@@ -633,6 +773,94 @@ export function MapMods(): JSX.Element {
           {/* close flex-col gap-2 */}
         </div>
         {/* close overflow-hidden */}
+        {/* Tier picker slide-down */}
+        <div
+          className="overflow-hidden transition-all duration-150"
+          style={{
+            maxHeight: showTierPicker || showTradeResults ? 120 : 0,
+            marginTop: showTierPicker || showTradeResults ? 8 : 0,
+            opacity: showTierPicker || showTradeResults ? 1 : 0,
+          }}
+        >
+          {hasNightmareMod ? (
+            <div className="flex gap-[4px] items-center">
+              <TierButton
+                icon={MAP_TIER_ICONS.nightmare}
+                size={38}
+                title="Nightmare"
+                disabled={tradeSearching || !regex}
+                onClick={() => searchMapTrade(16, true)}
+              />
+            </div>
+          ) : (
+            <>
+              {/* T1-T13 expandable */}
+              <div
+                className="overflow-hidden transition-all duration-150"
+                style={{ maxHeight: showAllTiers ? 50 : 0, marginBottom: showAllTiers ? 4 : 0 }}
+              >
+                <div className="flex gap-[3px] flex-wrap">
+                  {Array.from({ length: 13 }, (_, i) => i + 1).map((t) => (
+                    <TierButton
+                      key={t}
+                      icon={tierIcons[t]}
+                      size={26}
+                      title={`Tier ${t}`}
+                      disabled={tradeSearching || !regex}
+                      onClick={() => searchMapTrade(t, false)}
+                    />
+                  ))}
+                </div>
+              </div>
+              {/* All tiers toggle + T14-T16 + Nightmare */}
+              <div className="flex gap-[4px] items-center">
+                <button
+                  onClick={() => setShowAllTiers((v) => !v)}
+                  className="flex items-center justify-center border-none cursor-pointer"
+                  style={{
+                    background: showAllTiers ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.05)',
+                    borderRadius: 3,
+                    padding: '3px 3px 2px',
+                    width: 44,
+                    height: 44,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.12)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = showAllTiers
+                      ? 'rgba(255,255,255,0.12)'
+                      : 'rgba(255,255,255,0.05)'
+                  }}
+                  title="Show all tiers"
+                >
+                  <span className="text-[9px] font-semibold text-text-dim leading-tight text-center">
+                    All
+                    <br />
+                    tiers
+                  </span>
+                </button>
+                {[14, 15, 16].map((t) => (
+                  <TierButton
+                    key={t}
+                    icon={tierIcons[t]}
+                    size={38}
+                    title={`Tier ${t}`}
+                    disabled={tradeSearching || !regex}
+                    onClick={() => searchMapTrade(t, false)}
+                  />
+                ))}
+                <TierButton
+                  icon={MAP_TIER_ICONS.nightmare}
+                  size={38}
+                  title="Nightmare"
+                  disabled={tradeSearching || !regex}
+                  onClick={() => searchMapTrade(16, true)}
+                />
+              </div>
+            </>
+          )}
+        </div>
       </div>
       {/* close px-3 chips section */}
       {/* Saved presets -- horizontal scrolling cards (outside px-3 and overflow-hidden) */}
@@ -729,15 +957,21 @@ export function MapMods(): JSX.Element {
       {generator === 'maps' && (
         <>
           {/* Qualifiers / Avoid / Want tabs */}
-          <div className="flex gap-1 px-2 pt-1 pb-0 bg-bg-card">
+          <div
+            className="flex gap-1 px-2 pt-1 pb-0 bg-bg-card"
+            style={{ display: showTradeResults ? 'none' : undefined }}
+          >
             {(['qualifiers', 'avoid', 'want'] as const).map((t) => {
-              const isActive = tab === t
+              const isActive = tab === t && !showTradeResults
               const color = TAB_COLORS[t]
               const count = t === 'avoid' ? avoid.size : t === 'want' ? want.size : qualifierCount
               return (
                 <button
                   key={t}
-                  onClick={() => setTab(t)}
+                  onClick={() => {
+                    setTab(t)
+                    setShowTradeResults(false)
+                  }}
                   className={`flex-1 flex items-center justify-between px-3 text-[11px] py-[5px] border-none cursor-pointer transition-colors relative ${isActive ? 'regex-tab-active' : ''}`}
                   style={{
                     background: isActive ? 'var(--bg-solid)' : 'transparent',
@@ -779,8 +1013,60 @@ export function MapMods(): JSX.Element {
             })}
           </div>
 
+          {/* Trade results */}
+          {showTradeResults && (
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-bg">
+              <div className="flex items-center gap-2 px-[14px] py-[6px]">
+                <span className="text-[11px] text-text-dim flex-1">
+                  {tradeTotal != null ? `${tradeTotal} result${tradeTotal !== 1 ? 's' : ''}` : ''}
+                </span>
+                {tradeQueryId && (
+                  <button
+                    onClick={() =>
+                      window.api.openExternal(
+                        `https://www.pathofexile.com/trade/search/${encodeURIComponent(tradeLeague)}/${tradeQueryId}`,
+                      )
+                    }
+                    className="text-[10px] px-2 py-[3px] border-none cursor-pointer font-semibold bg-white/[0.08] text-text-dim rounded-[3px]"
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.15)'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
+                    }}
+                  >
+                    Open in Trade
+                  </button>
+                )}
+              </div>
+              {tradeError && <div className="text-[10px] text-[#ef5350] px-3 py-2">{tradeError}</div>}
+              {!tradeError && tradeListings.length === 0 && (
+                <div className="text-[11px] text-text-dim text-center p-4">No listings found</div>
+              )}
+              {tradeListings.length > 0 && (
+                <div className="flex-1 overflow-y-auto px-[14px]">
+                  <TradeListings
+                    listings={tradeListings}
+                    total={tradeTotal}
+                    itemClass="Maps"
+                    itemName=""
+                    itemRarity="Normal"
+                    expandedListing={expandedListing}
+                    setExpandedListing={setExpandedListing}
+                    priceChipMinWidth={priceChipMinWidth}
+                    loggedIn={loggedIn}
+                    actionStatus={actionStatus}
+                    setActionStatus={setActionStatus}
+                    queryId={tradeQueryId}
+                    league={tradeLeague}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Qualifier optimization toggle */}
-          {tab === 'qualifiers' && (
+          {!showTradeResults && tab === 'qualifiers' && (
             <div
               className="flex items-center gap-[6px] px-3 py-[6px] border-b border-border"
               style={{ background: 'var(--bg-solid)' }}
@@ -810,29 +1096,53 @@ export function MapMods(): JSX.Element {
             </div>
           )}
 
-          {/* Want mode toggle */}
-          {tab === 'want' && (
+          {/* Avoid sub-header */}
+          {!showTradeResults && tab === 'avoid' && (
             <div
-              className="flex items-center justify-end gap-[6px] px-3 py-[6px] border-b border-border"
+              className="flex items-center justify-center gap-[6px] px-3 py-[6px] border-b border-border"
               style={{ background: 'var(--bg-solid)' }}
             >
               <FilterChip
-                label="Any"
-                active={wantMode === 'any'}
-                onClick={() => setWantMode('any')}
-                color={TAB_COLORS.want}
-              />
-              <FilterChip
-                label="All"
-                active={wantMode === 'all'}
-                onClick={() => setWantMode('all')}
-                color={TAB_COLORS.want}
+                label="Show Nightmare mods"
+                active={showNightmare}
+                onClick={() => setShowNightmare((v) => !v)}
+                color={TAB_COLORS.avoid}
               />
             </div>
           )}
 
+          {/* Want sub-header */}
+          {!showTradeResults && tab === 'want' && (
+            <div
+              className="flex items-center gap-[6px] px-3 py-[6px] border-b border-border"
+              style={{ background: 'var(--bg-solid)' }}
+            >
+              <div className="flex-1" />
+              <FilterChip
+                label="Show Nightmare mods"
+                active={showNightmare}
+                onClick={() => setShowNightmare((v) => !v)}
+                color={TAB_COLORS.avoid}
+              />
+              <div className="flex-1 flex justify-end gap-[6px]">
+                <FilterChip
+                  label="Any"
+                  active={wantMode === 'any'}
+                  onClick={() => setWantMode('any')}
+                  color={TAB_COLORS.want}
+                />
+                <FilterChip
+                  label="All"
+                  active={wantMode === 'all'}
+                  onClick={() => setWantMode('all')}
+                  color={TAB_COLORS.want}
+                />
+              </div>
+            </div>
+          )}
+
           {/* Qualifiers list */}
-          {tab === 'qualifiers' && (
+          {!showTradeResults && tab === 'qualifiers' && (
             <div className="flex-1 overflow-y-auto bg-bg-card">
               {QUALIFIER_GROUPS.map((group) => {
                 const filteredQuals = search
@@ -939,7 +1249,7 @@ export function MapMods(): JSX.Element {
           )}
 
           {/* Mod list (avoid/want) */}
-          {(tab === 'avoid' || tab === 'want') && (
+          {!showTradeResults && (tab === 'avoid' || tab === 'want') && (
             <div className="flex-1 overflow-y-auto bg-bg-card">
               {grouped.map(({ mods, label, color, key }) => {
                 const isCollapsed = collapsed.has(key)

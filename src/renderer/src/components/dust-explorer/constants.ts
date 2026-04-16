@@ -19,8 +19,7 @@ for (const [cls, { bases, size }] of Object.entries(_itemClasses)) {
   for (const base of bases) baseClassMap[base] = cls
 }
 
-export const mirrorIconUrl =
-  'https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lEdXBsaWNhdGUiLCJzY2FsZSI6MX1d/8d7fea29d1/CurrencyDuplicate.png'
+export const mirrorIconUrl = (itemIcons as Record<string, string>)['Mirror of Kalandra']
 
 // Pre-compute base entries at module level so it doesn't block render
 export const cachedBaseEntries = (() => {

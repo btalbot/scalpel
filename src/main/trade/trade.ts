@@ -43,6 +43,7 @@ interface TradeListing {
     storedExperience?: number
     modTiers?: Record<string, { tier: string; name: string; ranges: string }>
     rarity?: string
+    mapProperties?: Array<{ name: string; value: string }>
   }
 }
 
@@ -197,7 +198,7 @@ async function fetchJson(url: string, options?: { method?: string; body?: string
 // ─── Trade API ────────────────────────────────────────────────────────────────
 
 import { ITEM_CLASS_TO_CATEGORY as _ITEM_CLASS_TO_CATEGORY } from './stat-matcher'
-import { ensureStatsLoaded as _ensureStatsLoaded } from './stat-matcher'
+import { ensureStatsLoaded as _ensureStatsLoaded, matchModToStat } from './stat-matcher'
 
 let lastTradeStatus: 'available' | 'securable' = 'available'
 
@@ -880,4 +881,162 @@ export async function searchBulkExchange(
   }
 
   return { total: result.total ?? 0, listings, queryId: result.id ?? '' }
+}
+
+// ─── Map Regex Trade Search ─────────────────────────────────────────────────
+
+export async function searchMapsByRegex(
+  league: string,
+  tier: number,
+  avoidTexts: string[],
+  wantTexts: string[],
+  wantMode: 'any' | 'all',
+  qualifiers: Record<string, number>,
+  nightmare: boolean,
+  tradeStatus: string,
+  tradePriceOption: string,
+): Promise<TradeResult> {
+  await _ensureStatsLoaded()
+  await throttle()
+
+  // Match mod texts to trade stat IDs
+  const matchMod = (text: string) => {
+    // Strip the number/percent formatting that formatModText adds
+    const cleaned = text.replace(/#%?/g, '').trim()
+    return matchModToStat(cleaned, false, 'explicit') ?? matchModToStat(text, false, 'explicit')
+  }
+
+  const avoidFilters = avoidTexts
+    .map((t) => matchMod(t))
+    .filter(Boolean)
+    .map((m) => ({ id: m!.statId, value: {} }))
+
+  const wantFilters = wantTexts
+    .map((t) => matchMod(t))
+    .filter(Boolean)
+    .map((m) => ({ id: m!.statId, value: {} }))
+
+  const statGroups: Array<{
+    type: string
+    filters: Array<{ id: string; value: Record<string, unknown> }>
+    value?: Record<string, unknown>
+  }> = []
+
+  // Avoid mods -> "not" group
+  if (avoidFilters.length > 0) {
+    statGroups.push({ type: 'not', filters: avoidFilters })
+  }
+
+  // Want mods -> "and" or "count" group
+  if (wantFilters.length > 0) {
+    if (wantMode === 'all') {
+      statGroups.push({ type: 'and', filters: wantFilters })
+    } else {
+      statGroups.push({ type: 'count', filters: wantFilters, value: { min: 1 } })
+    }
+  }
+
+  // Qualifier filters as map stat requirements
+  const mapFilterObj: Record<string, unknown> = {
+    map_tier: { min: tier, max: tier },
+  }
+  if (qualifiers.quantity) mapFilterObj.map_iiq = { min: qualifiers.quantity }
+  if (qualifiers.packsize) mapFilterObj.map_packsize = { min: qualifiers.packsize }
+  if (qualifiers.rarity) mapFilterObj.map_iir = { min: qualifiers.rarity }
+
+  // Pseudo stat qualifiers (More Maps, More Currency, More Scarabs, More Div Cards)
+  const pseudoQualMap: Record<string, string> = {
+    moremaps: 'pseudo.pseudo_map_more_map_drops',
+    morecurrency: 'pseudo.pseudo_map_more_currency_drops',
+    morescarabs: 'pseudo.pseudo_map_more_scarab_drops',
+    moredivcards: 'pseudo.pseudo_map_more_card_drops',
+  }
+  const pseudoFilters: Array<{ id: string; value: Record<string, unknown> }> = []
+  for (const [key, statId] of Object.entries(pseudoQualMap)) {
+    if (qualifiers[key]) pseudoFilters.push({ id: statId, value: { min: qualifiers[key] } })
+  }
+  if (pseudoFilters.length > 0) {
+    statGroups.push({ type: 'and', filters: pseudoFilters })
+  }
+
+  const query: Record<string, unknown> = {
+    status: { option: tradeStatus },
+    type: nightmare ? 'Nightmare Map' : { option: 'Map', discriminator: 'map' },
+    stats: statGroups.length > 0 ? statGroups : [{ type: 'and', filters: [] }],
+    filters: {
+      type_filters: { disabled: false, filters: { rarity: { option: 'nonunique' } } },
+      map_filters: { disabled: false, filters: mapFilterObj },
+      trade_filters: {
+        disabled: false,
+        filters: {
+          ...(tradePriceOption === 'chaos_divine' ? { price: { min: null, max: null, option: tradePriceOption } } : {}),
+          collapse: { option: 'true' },
+        },
+      },
+    },
+  }
+
+  const body = JSON.stringify({ query, sort: { price: 'asc' } })
+
+  const searchResult = (await fetchJson(`${POE_TRADE_API}/search/${encodeURIComponent(league)}`, {
+    method: 'POST',
+    body,
+  })) as TradeSearchResult
+
+  if (!searchResult.result || searchResult.result.length === 0) {
+    return { total: searchResult.total ?? 0, listings: [], queryId: searchResult.id ?? '' }
+  }
+
+  await throttle()
+  const ids = searchResult.result.slice(0, 10).join(',')
+  const fetchResult = (await fetchJson(`${POE_TRADE_API}/fetch/${ids}?query=${searchResult.id}`)) as {
+    result: Array<{
+      id: string
+      listing: {
+        price?: { amount: number; currency: string }
+        account: { name: string; lastCharacterName?: string; online?: { status?: string } }
+        indexed?: string
+        whisper?: string
+        method?: string
+      }
+      item?: {
+        name?: string
+        baseType?: string
+        typeLine?: string
+        frameType?: number
+        icon?: string
+        ilvl?: number
+        implicitMods?: string[]
+        explicitMods?: string[]
+        properties?: Array<{ name: string; values: Array<[string, number]> }>
+      }
+    }>
+  }
+
+  const listings: TradeListing[] = (fetchResult.result ?? []).map((r) => ({
+    id: r.id,
+    price: r.listing.price ? { amount: r.listing.price.amount, currency: r.listing.price.currency } : null,
+    account: r.listing.account.name,
+    characterName: r.listing.account.lastCharacterName,
+    online: !!r.listing.account.online,
+    instantBuyout:
+      tradeStatus === 'securable' || !!(r.listing.method === 'instant' || (!r.listing.whisper && r.listing.price)),
+    icon: r.item?.icon,
+    indexed: r.listing.indexed,
+    itemData: r.item
+      ? {
+          name: r.item.name,
+          baseType: r.item.baseType ?? r.item.typeLine,
+          rarity: ['Normal', 'Magic', 'Rare', 'Unique'][r.item.frameType ?? 0] ?? 'Normal',
+          explicitMods: r.item.explicitMods ?? [],
+          implicitMods: r.item.implicitMods,
+          ilvl: r.item.ilvl,
+          mapProperties: r.item.properties
+            ?.filter((p) => p.values?.[0]?.[0] != null)
+            .map((p) => ({ name: p.name, value: p.values[0][0] })),
+        }
+      : undefined,
+  }))
+
+  return { total: searchResult.total ?? 0, listings, queryId: searchResult.id ?? '' }
 }

@@ -1,6 +1,12 @@
 import { BrowserWindow, ipcMain, session } from 'electron'
 import Store from 'electron-store'
-import { searchTrade, isBulkExchangeItem, getBulkExchangeId, searchBulkExchange } from '../trade/trade'
+import {
+  searchTrade,
+  isBulkExchangeItem,
+  getBulkExchangeId,
+  searchBulkExchange,
+  searchMapsByRegex,
+} from '../trade/trade'
 import type { StatFilter, TradeResult, BulkExchangeResult } from '../trade/trade'
 import type { AppSettings } from '../../shared/types'
 import { POE_WEBSITE } from '../../shared/endpoints'
@@ -205,4 +211,35 @@ export function register(store: Store<AppSettings>): void {
   ipcMain.handle('open-external', (_event, url: string) => {
     require('electron').shell.openExternal(url)
   })
+
+  ipcMain.handle(
+    'map-regex-trade',
+    async (
+      _event,
+      params: {
+        tier: number
+        avoidTexts: string[]
+        wantTexts: string[]
+        wantMode: 'any' | 'all'
+        qualifiers: Record<string, number>
+        nightmare: boolean
+      },
+    ) => {
+      const league = store.get('league')
+      const tradeStatus = store.get('tradeStatus') ?? 'available'
+      const tradePriceOption = store.get('tradePriceOption') ?? 'chaos_divine'
+      const result = await searchMapsByRegex(
+        league,
+        params.tier,
+        params.avoidTexts,
+        params.wantTexts,
+        params.wantMode,
+        params.qualifiers,
+        params.nightmare,
+        tradeStatus,
+        tradePriceOption,
+      )
+      return { ...result, league }
+    },
+  )
 }

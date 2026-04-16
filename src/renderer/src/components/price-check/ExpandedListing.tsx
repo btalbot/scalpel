@@ -105,6 +105,17 @@ export function ExpandedListing({ listing: l, itemClass, itemName, itemRarity }:
             {d.ilvl ? `${d.name !== d.baseType ? ' ' : ''}(iLvl ${d.ilvl})` : ''}
           </div>
         )}
+        {/* Map properties (tier, IIQ, pack size, etc.) */}
+        {d.mapProperties && d.mapProperties.length > 0 && (
+          <div className="mt-1 pt-1 w-full flex flex-col gap-[1px]" style={MOD_SEPARATOR}>
+            {d.mapProperties.map((p, i) => (
+              <div key={i} className="text-[10px] text-text-dim">
+                {p.name}: <span className="text-[#88ccff] font-semibold">{p.value}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {d.storedExperience != null && (
           <div className="text-[10px] text-text-dim">
             Stored Experience: <span className="text-text font-semibold">{d.storedExperience.toLocaleString()}</span>

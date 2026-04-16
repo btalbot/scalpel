@@ -49,6 +49,7 @@ export interface Listing {
     pdps?: number
     edps?: number
     dps?: number
+    mapProperties?: Array<{ name: string; value: string }>
   }
 }
 
