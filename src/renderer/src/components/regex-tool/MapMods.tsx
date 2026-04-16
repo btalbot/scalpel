@@ -222,6 +222,9 @@ export function MapMods(): JSX.Element {
     window.api.poeCheckAuth().then((r) => setLoggedIn(r.loggedIn))
   }, [])
 
+  const [tradeOriginator, setTradeOriginator] = useState(false)
+  const [tradeCorrupted8mod, setTradeCorrupted8mod] = useState(false)
+
   const searchMapTrade = async (tier: number, nightmare: boolean) => {
     setTradeSearching(true)
     setTradeError(null)
@@ -241,6 +244,8 @@ export function MapMods(): JSX.Element {
         wantMode,
         qualifiers: qualObj,
         nightmare,
+        originator: tradeOriginator,
+        corrupted8mod: tradeCorrupted8mod,
       })) as { total: number; listings: Listing[]; queryId: string; league: string }
       setTradeListings(result.listings)
       setTradeTotal(result.total)
@@ -350,8 +355,8 @@ export function MapMods(): JSX.Element {
   const hasMoreQualifier = ['morecurrency', 'morescarabs', 'moremaps'].some(
     (k) => qualifiers[k] != null && qualifiers[k]! > 0,
   )
-  const tierIcons = hasMoreQualifier ? ORIGINATOR_TIER_ICONS : MAP_TIER_ICONS
-  const hasNightmareMod = MAP_MODS.some((m) => m.nightmare && (avoid.has(m.id) || want.has(m.id)))
+  const tierIcons = hasMoreQualifier || tradeOriginator ? ORIGINATOR_TIER_ICONS : MAP_TIER_ICONS
+  const hasNightmareMod = MAP_MODS.some((m) => m.nightmare && want.has(m.id))
 
   useEffect(() => {
     window.api.reportRegex(regex)
@@ -777,13 +782,41 @@ export function MapMods(): JSX.Element {
         <div
           className="overflow-hidden transition-all duration-150"
           style={{
-            maxHeight: showTierPicker || showTradeResults ? 120 : 0,
-            marginTop: showTierPicker || showTradeResults ? 8 : 0,
+            maxHeight: showTierPicker || showTradeResults ? 150 : 0,
             opacity: showTierPicker || showTradeResults ? 1 : 0,
+            margin: showTierPicker || showTradeResults ? '8px -12px 0' : '0',
+            padding: showTierPicker || showTradeResults ? '0 12px' : '0',
+            borderTop: '1px solid var(--border)',
+            paddingTop: showTierPicker || showTradeResults ? 8 : 0,
           }}
         >
+          {/* Map type chips */}
+          <div className="flex gap-[4px] mb-[4px]">
+            <FilterChip
+              label="Originator"
+              active={tradeOriginator}
+              onClick={() => setTradeOriginator((v) => !v)}
+              color="#dddddd"
+            />
+            <FilterChip
+              label="8-mod Corrupted"
+              active={tradeCorrupted8mod}
+              onClick={() => setTradeCorrupted8mod((v) => !v)}
+              color="#ef5350"
+            />
+          </div>
           {hasNightmareMod ? (
             <div className="flex gap-[4px] items-center">
+              {[14, 15, 16].map((t) => (
+                <TierButton
+                  key={t}
+                  icon={ORIGINATOR_TIER_ICONS[t]}
+                  size={38}
+                  title={`Originator Tier ${t}`}
+                  disabled={tradeSearching || !regex}
+                  onClick={() => searchMapTrade(t, false)}
+                />
+              ))}
               <TierButton
                 icon={MAP_TIER_ICONS.nightmare}
                 size={38}

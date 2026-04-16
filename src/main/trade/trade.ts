@@ -893,17 +893,38 @@ export async function searchMapsByRegex(
   wantMode: 'any' | 'all',
   qualifiers: Record<string, number>,
   nightmare: boolean,
+  originator: boolean,
+  corrupted8mod: boolean,
   tradeStatus: string,
   tradePriceOption: string,
 ): Promise<TradeResult> {
   await _ensureStatsLoaded()
   await throttle()
 
+  // poe.re text -> trade API text overrides for mods with different wording
+  const modTextOverrides: Record<string, string> = {
+    'Monsters inflict # Grasping Vines on Hit': 'Monsters inflict # Grasping Vine on Hit',
+    'Players are targeted by a Meteor when they use a Flask':
+      'Players have #% chance to be targeted by a Meteor when they use a Flask',
+    'Rare Monsters have Volatile Cores': 'Rare Monsters have #% chance to have a Volatile Core',
+  }
+
   // Match mod texts to trade stat IDs
+  // Compound mods use | separators - try each part individually
   const matchMod = (text: string) => {
-    // Strip the number/percent formatting that formatModText adds
-    const cleaned = text.replace(/#%?/g, '').trim()
-    return matchModToStat(cleaned, false, 'explicit') ?? matchModToStat(text, false, 'explicit')
+    const parts = text.split('|')
+    for (const part of parts) {
+      const p = part.trim()
+      const overridden = modTextOverrides[p]
+      if (overridden) {
+        const result = matchModToStat(overridden, false, 'explicit')
+        if (result) return result
+      }
+      const cleaned = p.replace(/#%?/g, '').trim()
+      const result = matchModToStat(cleaned, false, 'explicit') ?? matchModToStat(p, false, 'explicit')
+      if (result) return result
+    }
+    return null
   }
 
   const avoidFilters = avoidTexts
@@ -959,6 +980,22 @@ export async function searchMapsByRegex(
     statGroups.push({ type: 'and', filters: pseudoFilters })
   }
 
+  // 8-mod corrupted: add pseudo affix count filter
+  if (corrupted8mod) {
+    statGroups.push({ type: 'and', filters: [{ id: 'pseudo.pseudo_number_of_affix_mods', value: { min: 8 } }] })
+  }
+
+  // Originator: implicit stat "Area is Influenced by the Originator's Memories"
+  if (originator && !nightmare) {
+    const originatorStat = matchModToStat("Area is Influenced by the Originator's Memories", false, 'implicit')
+    if (originatorStat) {
+      statGroups.push({ type: 'and', filters: [{ id: originatorStat.statId, value: {} }] })
+    }
+  }
+
+  const miscFilters: Record<string, unknown> = {}
+  if (corrupted8mod) miscFilters.corrupted = { option: 'true' }
+
   const query: Record<string, unknown> = {
     status: { option: tradeStatus },
     type: nightmare ? 'Nightmare Map' : { option: 'Map', discriminator: 'map' },
@@ -966,6 +1003,7 @@ export async function searchMapsByRegex(
     filters: {
       type_filters: { disabled: false, filters: { rarity: { option: 'nonunique' } } },
       map_filters: { disabled: false, filters: mapFilterObj },
+      ...(Object.keys(miscFilters).length > 0 ? { misc_filters: { disabled: false, filters: miscFilters } } : {}),
       trade_filters: {
         disabled: false,
         filters: {

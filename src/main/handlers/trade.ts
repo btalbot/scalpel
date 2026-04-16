@@ -223,6 +223,8 @@ export function register(store: Store<AppSettings>): void {
         wantMode: 'any' | 'all'
         qualifiers: Record<string, number>
         nightmare: boolean
+        originator: boolean
+        corrupted8mod: boolean
       },
     ) => {
       const league = store.get('league')
@@ -236,6 +238,8 @@ export function register(store: Store<AppSettings>): void {
         params.wantMode,
         params.qualifiers,
         params.nightmare,
+        params.originator,
+        params.corrupted8mod,
         tradeStatus,
         tradePriceOption,
       )

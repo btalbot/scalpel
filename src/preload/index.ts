@@ -288,6 +288,8 @@ export const api = {
     wantMode: 'any' | 'all'
     qualifiers: Record<string, number>
     nightmare: boolean
+    originator: boolean
+    corrupted8mod: boolean
   }): Promise<{
     total: number
     listings: Array<{
